@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>my-adb-app</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true">adb</span>
+    <div class="brand-text">
+      <h1>my-adb-app</h1>
+      <p class="sub">adb 相关小工具集合</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span id="conn" class="conn" data-state="connecting">
+      <span class="conn-dot" aria-hidden="true"></span><span id="conn-text">加载中…</span>
+    </span>
+    <button id="stop-all" class="btn ghost small" type="button">全部停止</button>
+    <button id="theme" class="btn ghost" type="button" aria-label="切换浅色/深色主题">深色</button>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <h2>选择一个功能</h2>
+    <p>点开卡片进入各自的二级控制台；这里的启动 / 停止按钮用的是上次保存的参数。</p>
+  </section>
+
+  <section id="tools" class="tools" aria-label="功能列表">
+    <p class="card-note">加载中…</p>
+  </section>
+</main>
+
+<script src="/static/common.js"></script>
+<script src="/static/home.js"></script>
+</body>
+</html>
