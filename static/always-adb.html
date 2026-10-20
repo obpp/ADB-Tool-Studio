@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>always-adb · my-adb-app</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <a class="brand-mark" href="/" aria-label="返回首页">adb</a>
+    <div class="brand-text">
+      <h1>always-adb</h1>
+      <p class="sub">force_adb 常驻设置循环 · 原 <code>_always_adb.bat</code> 的 Web 实现</p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span id="conn" class="conn" data-state="connecting">
+      <span class="conn-dot" aria-hidden="true"></span><span id="conn-text">连接中…</span>
+    </span>
+    <button id="theme" class="btn ghost" type="button" aria-label="切换浅色/深色主题">深色</button>
+  </div>
+</header>
+
+<nav class="crumb">
+  <a href="/">my-adb-app</a>
+  <span class="sep">/</span>
+  <span>always-adb</span>
+</nav>
+
+<main>
+
+  <section class="card status-card">
+    <div class="status-main">
+      <span id="badge" class="badge" data-tone="idle" aria-live="polite">
+        <span class="badge-icon" aria-hidden="true">■</span><span class="badge-text">已停止</span>
+      </span>
+      <dl class="meta">
+        <div><dt>运行模式</dt><dd id="meta-mode">—</dd></div>
+        <div><dt>已运行</dt><dd id="meta-uptime">—</dd></div>
+        <div><dt>最近一次成功</dt><dd id="meta-last">—</dd></div>
+        <div><dt>目标设备</dt><dd id="meta-target">—</dd></div>
+      </dl>
+    </div>
+    <div class="actions">
+      <button id="btn-start" class="btn primary" type="button">开始循环</button>
+      <button id="btn-once" class="btn" type="button">单次执行</button>
+      <button id="btn-stop" class="btn danger" type="button" disabled>停止</button>
+    </div>
+  </section>
+
+  <section class="kpis" aria-label="运行统计">
+    <div class="kpi">
+      <span class="kpi-label">完成轮次</span>
+      <span class="kpi-value" id="kpi-rounds">0</span>
+      <span class="kpi-hint">root + sync 全部跑完</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label">成功设置</span>
+      <span class="kpi-value" id="kpi-ok">0</span>
+      <span class="kpi-hint">force_adb 写入成功次数</span>
+    </div>
+    <div class="kpi">
+      <span class="kpi-label">重试次数</span>
+      <span class="kpi-value" id="kpi-retries">0</span>
+      <span class="kpi-hint">设置失败后累计重试</span>
+    </div>
+    <div class="kpi" id="kpi-fail-tile">
+      <span class="kpi-label">连续失败</span>
+      <span class="kpi-value" id="kpi-fails">0</span>
+      <span class="kpi-hint" id="kpi-fails-hint">设备正常</span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>运行参数</h2>
+      <span class="card-note">改动会写入 <code>config/always_adb.json</code>，下一轮生效</span>
+    </div>
+    <form id="config-form" class="config-grid">
+      <label class="field span-2">
+        <span class="field-label">adb 可执行文件路径</span>
+        <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
+      </label>
+
+      <label class="field">
+        <span class="field-label">目标设备</span>
+        <select id="cfg-serial"></select>
+      </label>
+
+      <label class="field">
+        <span class="field-label">force_adb 值</span>
+        <input id="cfg-value" type="text" inputmode="numeric" autocomplete="off">
+      </label>
+
+      <label class="field">
+        <span class="field-label">失败重试间隔（秒）</span>
+        <input id="cfg-retry" type="number" min="0.1" max="600" step="0.1">
+      </label>
+
+      <label class="field">
+        <span class="field-label">每轮成功后等待（秒）</span>
+        <input id="cfg-wait" type="number" min="0" max="86400" step="1">
+      </label>
+
+      <label class="field">
+        <span class="field-label">单条命令超时（秒）</span>
+        <input id="cfg-timeout" type="number" min="1" max="3600" step="1">
+      </label>
+
+      <div class="field checks span-2">
+        <label class="check"><input id="cfg-doroot" type="checkbox"> 执行 <code>adb root</code></label>
+        <label class="check"><input id="cfg-dosync" type="checkbox"> 执行 <code>adb shell sync</code></label>
+        <label class="check"><input id="cfg-waitroot" type="checkbox"> root 后等待设备重新上线（推荐）</label>
+      </div>
+
+      <div class="form-actions span-2">
+        <button class="btn primary" type="submit">保存参数</button>
+        <span id="cfg-status" class="form-status" role="status"></span>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>设备</h2>
+      <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
+    </div>
+    <div class="table-wrap">
+      <table class="devices">
+        <thead>
+          <tr><th>序列号</th><th>状态</th><th>型号</th><th>product</th></tr>
+        </thead>
+        <tbody id="device-rows">
+          <tr><td colspan="4" class="empty">加载中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card log-card">
+    <div class="card-head">
+      <h2>运行日志</h2>
+      <div class="card-tools">
+        <label class="check small"><input id="follow" type="checkbox" checked> 跟随最新</label>
+        <button id="btn-clear" class="btn ghost small" type="button">清空</button>
+      </div>
+    </div>
+    <div id="log" class="log" role="log" aria-label="运行日志"></div>
+  </section>
+
+</main>
+
+<script src="/static/common.js"></script>
+<script src="/static/always-adb.js"></script>
+</body>
+</html>

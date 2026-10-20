@@ -1,0 +1,11 @@
+# Desktop-shell only (desktop/). Keep this file ASCII: pip decodes requirements
+# files with the system ANSI codepage on Chinese Windows (cp936), where UTF-8
+# comments can raise UnicodeDecodeError.
+#
+# The web version (server.py) needs NONE of these -- it is stdlib-only on
+# purpose, that is what makes it droppable on any machine with a Python.
+# Install these only when you want the native window + tray, or to build the exe.
+
+pywebview>=6.0,<7       # native window; pulls in pythonnet on Windows
+pystray>=0.19.5         # tray icon
+Pillow>=10              # pystray needs it to read icon.ico

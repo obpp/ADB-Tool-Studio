@@ -1,0 +1,11 @@
+{
+  "adbPath": "E:\\zhangshijin\\platform-tools-latest-windows\\platform-tools\\adb.EXE",
+  "serial": "",
+  "forceAdbValue": "1",
+  "retryInterval": 2.5,
+  "waitSeconds": 10.0,
+  "commandTimeout": 30.0,
+  "waitAfterRoot": true,
+  "doRoot": true,
+  "doSync": true
+}
