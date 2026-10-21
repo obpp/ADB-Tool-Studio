@@ -10,6 +10,7 @@
 """
 
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -21,14 +22,37 @@ from toolbase import (Tool, STATUS_RUNNING, STATUS_RECONNECTING,
 
 HOST_KEY_POLICIES = ("accept-new", "yes", "no")
 
+# 远程 adb 客户端默认就连 5037；远程绑定端口换成别的，服务端必须设这个环境变量
+DEFAULT_REMOTE_PORT = 5037
+
+# OpenSSH 绑定失败时的原文：
+#   Warning: remote port forwarding failed for listen port 5037
+FORWARD_FAIL_RE = re.compile(r"remote port forwarding failed for listen port (\d+)", re.I)
+
+# ssh 进程活过这么久还没退出，就认为隧道已经建好了（ExitOnForwardFailure=yes
+# 和 BatchMode=yes 会让绑定失败/认证失败在 1 秒内就退出）。只用来决定什么时候
+# 提示用户设 ANDROID_ADB_SERVER_PORT，说错也不会影响隧道本身。
+UP_HINT_DELAY = 3.0
+
+
+def env_command(port):
+    """服务端 adb 客户端指向隧道端口的那条命令。"""
+    return "export ANDROID_ADB_SERVER_PORT=%d" % port
+
+
+def suggest_port(port):
+    """端口被占用时给个相邻的建议值。"""
+    if port < 65535:
+        return port + 1
+    return port - 1
+
+
 # ssh 的常见报错 -> 一句人话提示（每条只提示一次，别刷屏）
 HINTS = (
     ("permission denied",
      "认证被拒绝：确认远程 ~/.ssh/authorized_keys 里有本机公钥，或本机已 ssh-add 加载密钥"),
     ("host key verification failed",
      "主机指纹校验失败：把「主机指纹」改成「自动接受新的」，或先手动 ssh 一次写入 known_hosts"),
-    ("remote port forwarding failed",
-     "远程端口转发被拒：远程该端口可能已被占用；若要绑到 0.0.0.0 还需远程 sshd 开启 GatewayPorts"),
     ("address already in use",
      "端口已被占用：远程该端口上已经有别的进程在监听"),
     ("connection refused",
@@ -93,6 +117,13 @@ class SshTunnelTool(Tool):
     desc = "把本机 adb server 反向映射到远程主机，远程即可直接操作接在本机的设备"
     page = "ssh-tunnel"
     icon = "⇄"
+
+    def __init__(self, app_dir):
+        Tool.__init__(self, app_dir)
+        # 最近一次绑定失败的远程端口（None = 没失败过），给页面提红色提示用
+        self._blocked_port = None
+        self._warned_ports = set()     # 同一次运行里，每个端口只唠叨一遍
+        self._hinted_ports = set()     # 同理，环境变量提示也只说一次
 
     # ---------------- 配置 ----------------
 
@@ -166,6 +197,8 @@ class SshTunnelTool(Tool):
             "target": ("%s@%s" % (cfg["user"], cfg["host"])) if cfg["user"] else cfg["host"],
             "connected": self.connected(),
             "command": shell_join(build_ssh_command(cfg)),
+            # 最近一次绑定失败的端口（页面据此把端口提示标红）
+            "blockedPort": self._blocked_port,
         }
 
     def brief(self):
@@ -202,6 +235,10 @@ class SshTunnelTool(Tool):
     def run_loop(self):
         cfg = dict(self.config)
         delay = 0.0
+        # 每次启动重新算：上一次的端口失败提示不该跟着这一轮
+        self._blocked_port = None
+        self._warned_ports = set()
+        self._hinted_ports = set()
 
         while not self.stop_event.is_set():
             if delay:
@@ -247,6 +284,11 @@ class SshTunnelTool(Tool):
             reader.daemon = True
             reader.start()
 
+            hint = threading.Thread(target=self._hint_when_up, args=(proc, cfg),
+                                    name="ssh-hint")
+            hint.daemon = True
+            hint.start()
+
             rc = proc.wait()
             reader.join(timeout=2)
 
@@ -281,6 +323,13 @@ class SshTunnelTool(Tool):
                 if not line:
                     continue
                 self.log("info", line)
+
+                match = FORWARD_FAIL_RE.search(line)
+                if match:
+                    # 这句单独处理：要告诉用户换成哪个端口、服务端怎么配合
+                    self._bind_failed(int(match.group(1)))
+                    continue
+
                 low = line.lower()
                 for key, hint in HINTS:
                     if key in low and key not in seen:
@@ -288,3 +337,51 @@ class SshTunnelTool(Tool):
                         self.log("warn", hint)
         except (ValueError, OSError):
             pass
+
+    def _bind_failed(self, port):
+        """远程端口绑定失败：提示换端口，并提醒服务端同步环境变量。"""
+        suggest = suggest_port(port)
+        with self.lock:
+            self._blocked_port = port
+            first = port not in self._warned_ports
+            self._warned_ports.add(port)
+        self.publish_state()
+        if not first:
+            return
+
+        self.log("warn", "远程端口 %d 绑定失败：那台机器上可能已经有进程占着这个端口。"
+                 % port)
+        self.log("warn", "把「远程绑定端口」改成别的端口（比如 %d），保存后重新点启动。"
+                 % suggest)
+        self.log("warn", "换好后服务端 adb 要连新端口：%s" % env_command(suggest))
+        if self.config.get("gatewayPorts"):
+            self.log("warn", "如果勾了「绑定到 0.0.0.0」，也可能服务端 sshd 没开 GatewayPorts —— 先取消勾选再试。")
+
+    def _hint_when_up(self, proc, cfg):
+        """进程活过 UP_HINT_DELAY 还没退出，就认为连上了，补一句服务端要做什么。
+
+        判断是启发式的：ssh 的 -N 成功时不打印任何东西，没有可靠的「已建立」信号。
+        就算判断早了也只是多一条提示，不会改动隧道本身。
+        """
+        if self.stop_event.wait(UP_HINT_DELAY):
+            return
+        if self.stop_event.is_set() or proc.poll() is not None:
+            return
+        with self.lock:
+            if self.process is not proc:
+                return
+            port = cfg["remotePort"]
+            # 这一轮端口是好的，之前被占用的红字可以摘掉了
+            self._blocked_port = None
+            first = port not in self._hinted_ports
+            self._hinted_ports.add(port)
+        self.publish_state()
+        if not first:
+            return
+
+        if port == DEFAULT_REMOTE_PORT:
+            self.log("info", "隧道已建立；远程端口是默认的 5037，服务端 adb 不用改环境变量")
+            return
+        self.log("ok", "隧道已建立，远程端口是 %d。服务端 adb 客户端要连这个端口：" % port)
+        self.log("cmd", env_command(port))
+        self.log("info", "在这台机器上执行它（写进 ~/.bashrc 可以持久化），再敲 `adb devices`")

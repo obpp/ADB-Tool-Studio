@@ -85,12 +85,15 @@ class Tool(object):
     desc = ""
     page = ""      # 二级页面路由，如 "always-adb" -> /always-adb
     icon = "•"     # 一级页面卡片上的字形
+    # 内存里留多少条日志。每次打开页面都会把整份历史重发到浏览器，
+    # 日志刷得快的工具（always-adb）子类可以调小，免得切页面时卡一下。
+    history_limit = 500
 
     def __init__(self, app_dir):
         self.app_dir = app_dir
         self.lock = threading.RLock()
         self.subscribers = []
-        self.history = deque(maxlen=500)
+        self.history = deque(maxlen=self.history_limit)
         self.seq = 0
         self.status = STATUS_IDLE
         self.started_at = None
