@@ -1,8 +1,8 @@
-# my-adb-desktop
+# ADB Tool Studio
 
 `my-adb-app` 的桌面版：同一个后端，外面套一层 Windows 原生窗口 + 托盘，可以打包成 exe。
 
-功能完全一样（always-adb、adb 反向隧道），**网页版那一套原样保留** ——
+功能完全一样（always-adb、adb 反向隧道、脚本执行、替换镜像），**网页版那一套原样保留** ——
 `python3 server.py` 照样能跑，两边不会打架。
 
 > 这份是从 `../my-adb-app` 复制出来的独立副本，原目录没被动过。
@@ -45,7 +45,7 @@ build.bat
 
 它会建一个独立的虚拟环境 `.venv-build`（**别在全局环境里打** ——
 PyInstaller 会把当前环境扫得到的包全塞进 exe，打出来又大又杂），
-装依赖、生成图标、打包。产物在 `dist\my-adb-app.exe`。
+装依赖、生成图标、打包。产物在 `dist\ADB-Tool-Studio.exe`。
 
 ### 打包的三种方式
 
@@ -64,26 +64,26 @@ build.bat clean     清掉 PyInstaller 缓存重打
 
 ### 打包前会先关掉正在跑的实例
 
-`build.bat` 的第 5 步会自动 `taskkill` 掉正在跑的 `my-adb-app.exe`，然后把
-`dist\my-adb-app.exe` 删一次试试还占不占得住。看到这两行是正常的：
+`build.bat` 的第 5 步会自动 `taskkill` 掉正在跑的 `ADB-Tool-Studio.exe`，然后把
+`dist\ADB-Tool-Studio.exe` 删一次试试还占不占得住。看到这两行是正常的：
 
 ```
 [5/6] 关掉正在跑的实例 ...
-     发现 my-adb-app.exe 还在跑，已经关掉它。
+     发现 ADB-Tool-Studio.exe 还在跑，已经关掉它。
 ```
 
 **为什么要这么干**：Windows 不允许删掉正在运行的 exe。双击开着的那个程序缩在托盘里
 没退的话，PyInstaller 会在**最后一步**（分析全跑完之后）才撞上这件事，报：
 
 ```
-PermissionError: [WinError 5] 拒绝访问。: '...\dist\my-adb-app.exe'
+PermissionError: [WinError 5] 拒绝访问。: '...\dist\ADB-Tool-Studio.exe'
 ```
 
 那不是代码有问题，就是文件被自己占着。关掉正在跑的那个实例就好，
 而且重跑很快 —— 分析结果都缓存着，只有最后的组装那一步重来。
 
 真关不掉（比如被别的用户启动着、或者杀软咬着不放）脚本会提前停下来说清楚，
-不会让你白等一场。手动去任务管理器结束 `my-adb-app.exe` 再跑一遍就行。
+不会让你白等一场。手动去任务管理器结束 `ADB-Tool-Studio.exe` 再跑一遍就行。
 
 ## 开发时怎么快速验证（别打包一次测一次）
 
@@ -116,7 +116,7 @@ dev.bat popup       专门测「子进程会不会弹黑框」，十几秒出结
 ## 目录结构
 
 ```
-my-adb-desktop/
+ADB-Tool-Studio/
 ├── desktop/                  ← 桌面外壳（网页版不需要这一层）
 │   ├── app.py                入口：内嵌服务 + 窗口 + 托盘
 │   ├── tray.py               托盘图标与菜单
@@ -158,7 +158,7 @@ my-adb-desktop/
 | | 只读资源（static/、icon.ico） | 可写数据（config/、logs/） |
 |---|---|---|
 | 源码模式 | 项目目录 | 项目目录 |
-| 打包后 | 包里的 `sys._MEIPASS` | **exe 旁边**；写不进去（比如装在 Program Files）才退到 `%APPDATA%\my-adb-app\` |
+| 打包后 | 包里的 `sys._MEIPASS` | **exe 旁边**；写不进去（比如装在 Program Files）才退到 `%APPDATA%\ADB-Tool-Studio\` |
 
 日志在 `<可写数据目录>\logs\app.log`。桌面版没有控制台，**启动失败第一件事就是看它**，
 日志超过 512KB 会轮转成 `app.log.1`。
@@ -176,7 +176,7 @@ my-adb-desktop/
 
 - **双击** 打开窗口；**右键** 出菜单
 - 关窗口（点 ×）**不退出**，只是收进托盘；要真退出走托盘的「退出」
-- 「全部停止」= 把两个工具的后台任务都停掉（比如掐掉 ssh 隧道）
+- 「全部停止」= 把所有工具的后台任务都停掉（比如掐掉 ssh 隧道、中断一次烧写）
 - 「开机自启」勾上后写 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，
   只要用户权限、不弹 UAC。想取消就再点一下，或者去任务管理器的「启动」页关
 
@@ -231,6 +231,80 @@ ssh 的常见报错会被翻译成一句人话（认证被拒、指纹校验失�
 
 **前提**：本机得有个活着的 adb server 在监听 `5037`（`adb start-server`）。隧道本身只是转发的管道，本地没有监听者的话，远程连过来会被拒。
 
+### 3. 脚本执行（`/scripts`）
+
+把本地脚本推到设备上，用 `adb shell sh` 跑，输出实时回到日志。等价于：
+
+```bash
+adb -s <序列号> push check.sh /data/local/tmp/ats-0d30815d-check.sh
+adb -s <序列号> shell sh /data/local/tmp/ats-0d30815d-check.sh
+```
+
+**注意脚本是在设备上执行的**，不是在本机跑。设备上要有 `sh`（Android 都有）。
+
+| 参数 | 说明 |
+|---|---|
+| adb 路径 | 默认用跟程序放在一起的 adb，其次 PATH |
+| 目标设备 | 不选时只有「恰好一台在线」才自动选；多台必须自己选 |
+| 远程目录 | 默认 `/data/local/tmp`，必须是 `/` 开头的绝对路径 |
+| 超时 | 单次执行上限，默认 60 秒 |
+
+脚本库：
+
+- 「导入脚本…」打开文件浏览，也可以直接把文件拖到列表上；**只导入，没有页内编辑器**
+- 导入时去 UTF-8 BOM、把 CRLF 换成 LF —— 不换的话 Windows 上写的 `.sh` 到板子上必报 `: not found`
+- 导入后的名字可以就地改，删除要点两次（第二次才算数，防手滑）
+- **每次执行都重新推一份**，不做「设备上已有就跳过」：列表里显示的是哪份，跑的就一定是哪份
+- 设备上的文件名带脚本 id 前缀（`ats-0d30815d-check.sh`），两个同名脚本不会互相覆盖
+- 一次只跑一个，跑的时候不能删、不能再启动第二个
+- 「停止」只是断开 adb 连接，**设备上正在跑的命令不一定跟着退出**
+
+### 4. 替换镜像（`/replace-image`）
+
+把本地镜像推到设备上，`dd` 写进分区，然后重启。等价于：
+
+```bash
+adb -s <序列号> push ~/rk3576_r8/kernel-6.1/boot.img /mnt/ats-47fb54bd-boot.img
+adb -s <序列号> shell "dd if=/mnt/ats-47fb54bd-boot.img of=/dev/block/by-name/boot bs=1048576"
+adb -s <序列号> shell "reboot"
+```
+
+**这个功能会直接写块设备，写错了设备就起不来。** 页面上的流程是：
+
+1. 选一个预设（镜像路径 + 推送目录 + 写入目标 + 是否重启）
+2. 点「执行选中预设」→ 弹出确认条，写清楚要往哪台设备的哪个分区写什么
+3. 点「确认烧写」才真的开始
+
+预设：
+
+- 镜像**不复制进程序目录**，只记绝对路径 —— boot.img 动辄几十上百 MB，复制一份既费磁盘，改了源码目录里的文件还得再导一次
+- 名称只是列表里的标签，不影响烧写；留空就用镜像文件名（`boot.img` → `boot`）
+- 「浏览…」在桌面版里直接弹系统的选文件对话框（和「导入脚本」一样），选完只把完整路径填回来；
+  默认只看 `.img` / `.bin` / `.raw` / `.iso`。用浏览器跑网页版时浏览器不会把完整路径交给页面，退回服务端的目录浏览器
+- 路径输入框可以直接粘贴；网页版的目录浏览器里可以回车跳转、换 Windows 盘符
+- 推送目录默认 `/mnt`，写入目标默认 `/dev/block/by-name/boot`
+
+执行时依次过这几道闸，**任何一道不过都不写分区，更不会重启**：
+
+| 步骤 | 做什么 | 不过关时 |
+|---|---|---|
+| 参数校验 | 目标必须是 `/dev/` 下的路径，禁止 `..` 和 shell 元字符 | 直接放弃 |
+| `test -b` | 确认目标真是块设备（符号链接会跟过去） | 直接放弃 |
+| `blockdev` | 镜像比分区大就不写（设备没有 `blockdev` 时只警告） | 直接放弃 |
+| `push` | 推到 `<推送目录>/ats-<预设 id>-<文件名>` | 直接放弃 |
+| `wc -c` | 核对设备上的字节数和本地一致 | 直接放弃 |
+| `dd` | 写分区；返回码非 0，或输出里有 `No space left` / `I/O error` / `Permission denied` 也算失败 | 不重启 |
+| `sync` + `reboot` | 只有 dd 成功才执行 | — |
+
+几个要知道的点：
+
+- 参数里的「单步超时」默认 600 秒，push、dd、sync 每一步各算各的；大镜像推得慢就把这个调大（最大 7200 秒）
+- 写 `/dev/block/by-name/...` 通常需要 adbd 已经是 root；没有权限时 dd 会失败，程序会中止并且**不重启**
+- 「停止」在 dd 中途生效时，分区可能只写了一半，程序不会自动重启 —— 日志里会明确写出这一点
+- 推上去的镜像烧完不删，重启后还在推送目录里（`/mnt` 是 tmpfs 的话重启自然消失）
+- 网页版退回的目录浏览器能列本机任意目录，这是「只记录路径」的代价；服务默认只监听 `127.0.0.1`，用 `--host 0.0.0.0` 时请记住整站本来就没有鉴权
+- 桌面版的选文件对话框走的是 pywebview 的 `js_api`（`PageApi.pick_image`），只有 exe / `dev.bat` 里才有；浏览器里没有这座桥
+
 ## 加新功能
 
 1. 在 `tools/` 下写一个 `Tool` 子类，实现 `default_config()` / `sanitize_config()` / `run_loop()`；
@@ -246,16 +320,26 @@ ssh 的常见报错会被翻译成一句人话（认证被拒、指纹校验失�
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/` | 一级页面 |
-| GET | `/<page>` | 二级页面，如 `/always-adb`、`/ssh-tunnel` |
+| GET | `/<page>` | 二级页面，如 `/always-adb`、`/ssh-tunnel`、`/scripts`、`/replace-image` |
 | GET | `/api/tools` | 所有工具的状态摘要（一级页面用） |
 | GET | `/api/<id>/state` | 单个工具的全量状态 + 最近 500 条日志 |
 | GET | `/api/<id>/events` | SSE 流，事件：`snapshot` / `state` / `log` |
-| GET | `/api/<id>/devices` | 刷新并返回设备列表（always-adb） |
-| POST | `/api/<id>/start` | 启动，body 可带选项（always-adb 收 `{"once": true}`） |
+| GET | `/api/<id>/devices` | 刷新并返回设备列表（always-adb、脚本执行、替换镜像） |
+| POST | `/api/<id>/start` | 启动，body 可带选项（always-adb `once`、脚本执行 `scriptId`、替换镜像 `presetId`） |
 | POST | `/api/<id>/stop` | 停止，会打断正在进行的等待并杀掉子进程 |
 | POST | `/api/<id>/config` | 更新配置，按补丁合并，字段范围夹紧后落盘 |
 | POST | `/api/<id>/preview` | 只返回命令行预览，不执行（隧道） |
 | POST | `/api/<id>/logs/clear` | 清空服务端日志历史 |
+| POST | `/api/script_runner/scripts/import?name=` | 导入脚本，body 是原始字节（上限 2 MB） |
+| POST | `/api/script_runner/scripts/rename` | 脚本改名 |
+| POST | `/api/script_runner/scripts/delete` | 删除脚本（执行中返回 409） |
+| POST | `/api/replace_image/presets/save` | 新建或更新镜像预设 |
+| POST | `/api/replace_image/presets/delete` | 删除预设（烧写中返回 409） |
+| POST | `/api/replace_image/fs/list` | 列本机目录，供网页版的镜像浏览器用（`path` + `all`） |
+| POST | `/api/replace_image/fs/stat` | 查一个本地文件是否存在、多大 |
+
+工具自己的动作走 `Tool.api()` 这个通用出口（`server.py` 里不用为每个功能加分支），
+返回 `None` 表示不认识这个 action，最后统一落到 404。
 
 ## 注意
 

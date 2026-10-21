@@ -4,7 +4,7 @@
 
 图标 = 蓝色圆角方块 + 白色闪电。渲染时先按 3 倍超采样再缩回来，边缘就自然抗锯齿了。
 
-    python3 desktop/make_icon.py                 # 写 my-adb-desktop/icon.ico
+    python3 desktop/make_icon.py                 # 写 ADB-Tool-Studio/icon.ico
     python3 desktop/make_icon.py --preview p.png # 额外导一张 256 预览图
 
 生成的 icon.ico 已经提交进仓库；除非要改图标，平时不用跑这个脚本。
@@ -145,7 +145,7 @@ def main():
     here = os.path.dirname(os.path.abspath(__file__))
     default_out = os.path.join(os.path.dirname(here), "icon.ico")
 
-    parser = argparse.ArgumentParser(description="生成 my-adb-app 的图标")
+    parser = argparse.ArgumentParser(description="生成 ADB Tool Studio 的图标")
     parser.add_argument("--out", default=default_out, help="输出的 .ico 路径")
     parser.add_argument("--preview", help="额外导出一张 256 的 PNG，方便肉眼看效果")
     args = parser.parse_args()

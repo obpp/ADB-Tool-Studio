@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""my-adb-app —— adb 相关小工具的集合。
+"""ADB Tool Studio —— adb 相关小工具的集合。
 
-一级页面（/）列出所有功能，二级页面是每个功能自己的控制台。
+所有功能共用一套外壳：左边侧边栏切换功能，右边是当前功能的控制台。
+/ 直接进第一个功能，没有单独的总览页。
 
 * 后端：Python 3 标准库（http.server + ThreadingHTTPServer + SSE），零第三方依赖
 * 前端：static/ 下的纯 HTML/CSS/JS，无构建步骤
@@ -25,7 +26,7 @@ import socket
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import apppaths
 
@@ -70,7 +71,7 @@ registry = Registry(DATA_DIR, TOOL_CLASSES)
 class Handler(BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.1"
-    server_version = "my-adb-app"
+    server_version = "ADB-Tool-Studio"
 
     def log_message(self, fmt, *args):
         pass                          # 别把每条静态请求都刷到控制台
@@ -94,19 +95,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self):
+    # 请求体上限。脚本导入是唯一需要大 body 的地方，其余接口都是几百字节。
+    MAX_BODY = 2 * 1024 * 1024 + 4096
+
+    def _read_body(self):
+        """把请求体整个读成 bytes。太大返回 None。
+
+        两个都不能省的细节：
+          * HTTP/1.1 keep-alive 下必须把 Content-Length 声明的字节读干净，
+            不然后续字节会被当成下一个请求的请求行，整条连接就错乱了。
+          * 超限时没法读完，那就把连接标成用完即关，避免残留污染下一条请求。
+        """
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = 0
         if length <= 0:
-            return {}
-        raw = self.rfile.read(length)
-        try:
-            data = json.loads(raw.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            return {}
-        return data if isinstance(data, dict) else {}
+            return b""
+        if length > self.MAX_BODY:
+            self.close_connection = True
+            return None
+        return self.rfile.read(length)
 
     def _serve_static(self, rel):
         safe = os.path.normpath(rel).lstrip("/\\")
@@ -138,8 +147,13 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         parts = [p for p in path.split("/") if p]
 
+        # 首页 = 第一个注册的工具。没有总览页了，打开就直接进一个通道，
+        # 免得先看一眼空目录再点一下。
         if path in ("/", "/index.html"):
-            return self._serve_static("index.html")
+            tools = registry.all()
+            if not tools:
+                return self._send_text("没有注册任何工具", 500)
+            return self._serve_static(tools[0].page + ".html")
 
         if parts[:1] == ["static"]:
             return self._serve_static("/".join(parts[1:]))
@@ -171,21 +185,37 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_text("404 Not Found", 404)
 
     def do_POST(self):
-        path = urlparse(self.path).path
-        parts = [p for p in path.split("/") if p]
+        parsed_url = urlparse(self.path)
+        parts = [p for p in parsed_url.path.split("/") if p]
 
         if parts[:1] != ["api"] or len(parts) < 3:
+            self.close_connection = True      # body 没读，这条连接不能再复用
             return self._send_text("404 Not Found", 404)
 
         tool_id, action = parts[1], "/".join(parts[2:])
         tool = registry.get(tool_id)
         if tool is None:
+            self.close_connection = True
             return self._send_json({"error": "没有这个工具: %s" % tool_id}, 404)
 
-        body = self._read_json()
+        raw = self._read_body()
+        if raw is None:
+            return self._send_json({"ok": False, "error": "请求体太大"}, 413)
+
+        # 大多数接口是 JSON；脚本导入直接传原始字节，这里解析失败就当没有
+        data = {}
+        if raw:
+            try:
+                decoded = json.loads(raw.decode("utf-8"))
+                if isinstance(decoded, dict):
+                    data = decoded
+            except (ValueError, UnicodeDecodeError):
+                pass
+
+        query = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
 
         if action == "start":
-            ok, msg = tool.start(body)
+            ok, msg = tool.start(data)
             return self._send_json(
                 {"ok": ok, "message": msg, "state": tool.snapshot()},
                 200 if ok else 409)
@@ -197,7 +227,7 @@ class Handler(BaseHTTPRequestHandler):
                 200 if ok else 409)
 
         if action == "config":
-            tool.config = tool.sanitize_config(body, base=tool.config)
+            tool.config = tool.sanitize_config(data, base=tool.config)
             try:
                 tool.save_config()
                 saved = True
@@ -214,10 +244,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": True})
 
         if action == "preview" and hasattr(tool, "preview"):
-            result = tool.preview(body)
+            result = tool.preview(data)
             if result is None:
                 return self._send_json({"error": "这个工具不支持预览"}, 404)
             return self._send_json(result)
+
+        # 工具自己的动作（导入脚本之类）。返回 None 表示它也不认识这个 action。
+        # 这样加功能不用再回来改这里。
+        handler = getattr(tool, "api", None)
+        if handler is not None:
+            result = handler(action, raw, data, query)
+            if result is not None:
+                payload, status = result
+                return self._send_json(payload, status)
 
         return self._send_text("404 Not Found", 404)
 
@@ -325,7 +364,7 @@ def local_addresses():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="my-adb-app：adb 小工具集合")
+    parser = argparse.ArgumentParser(description="ADB Tool Studio：adb 小工具集合")
     parser.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
     parser.add_argument("--port", type=int, default=8765,
                         help="监听端口（默认 8765；0 = 让系统随便挑一个空闲的）")
@@ -334,7 +373,7 @@ def main():
     server = AppServer(args.host, args.port)
 
     exposing = args.host not in ("127.0.0.1", "localhost")
-    print("my-adb-app 已启动")
+    print("ADB Tool Studio 已启动")
     for tool in registry.all():
         print("  - %-14s %s  (config/%s.json)" % (tool.name, tool.desc, tool.id))
     print()

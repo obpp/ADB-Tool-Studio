@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>替换镜像 · ADB Tool Studio</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-tool="replace_image">
+
+<div class="app">
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+
+    <header class="nameplate">
+      <div class="nameplate-top">
+        <span id="badge" class="badge" data-tone="idle" aria-live="polite">
+          <span class="badge-icon" aria-hidden="true">■</span><span class="badge-text">已停止</span>
+        </span>
+        <h1>替换镜像</h1>
+        <span class="uptime" id="meta-uptime">—</span>
+      </div>
+
+      <div class="readout" role="group" aria-label="烧写统计">
+        <span class="ro"><span class="ro-k">预设</span><span class="ro-v" id="meta-preset">—</span></span>
+        <span class="ro"><span class="ro-k">设备</span><span class="ro-v" id="meta-device">—</span></span>
+        <span class="ro"><span class="ro-k">镜像</span><span class="ro-v" id="meta-image">—</span></span>
+        <span class="ro"><span class="ro-k">写入目标</span><span class="ro-v" id="meta-target">—</span></span>
+        <span class="ro"><span class="ro-k">已烧写</span><span class="ro-v" id="kpi-runs">0</span></span>
+        <span class="ro"><span class="ro-k">失败</span><span class="ro-v" id="kpi-failures">0</span></span>
+        <span class="ro"><span class="ro-k">上次退出码</span><span class="ro-v" id="meta-exit">—</span></span>
+        <span class="ro"><span class="ro-k">上次耗时</span><span class="ro-v" id="meta-elapsed">—</span></span>
+      </div>
+
+      <div class="actions">
+        <button id="btn-run" class="btn primary" type="button">执行选中预设</button>
+        <button id="btn-stop" class="btn danger" type="button" disabled>停止</button>
+      </div>
+
+      <!-- 写分区不可撤回，点执行只是「上膛」，这里才是真正开始 -->
+      <div class="confirm" id="confirm" hidden>
+        <p class="confirm-text" id="confirm-text"></p>
+        <p class="confirm-note">写入分区不可撤回。确认镜像和目标设备都没选错。</p>
+        <div class="confirm-actions">
+          <button id="btn-confirm-run" class="btn primary" type="button">确认烧写</button>
+          <button id="btn-confirm-cancel" class="btn ghost" type="button">取消</button>
+        </div>
+      </div>
+    </header>
+
+    <div class="rule"></div>
+
+    <div class="workspace">
+
+      <section class="pane pane-params">
+
+        <div class="pane-head">
+          <h2 class="pane-title">参数</h2>
+        </div>
+
+        <form id="config-form" class="config-grid">
+
+          <label class="field span-2">
+            <span class="field-label">adb 路径</span>
+            <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
+          </label>
+
+          <div class="field span-2">
+            <label class="field-label" for="cfg-serial">目标设备</label>
+            <span class="field-inline">
+              <select id="cfg-serial"></select>
+              <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
+            </span>
+          </div>
+
+          <label class="field span-2">
+            <span class="field-label">单步超时（秒）</span>
+            <input id="cfg-timeout" type="number" min="30" max="7200" step="10">
+          </label>
+
+          <div class="form-actions span-2">
+            <button class="btn primary" type="submit">保存参数</button>
+            <span id="cfg-status" class="form-status" role="status"></span>
+          </div>
+        </form>
+
+        <div class="pane-head">
+          <h2 class="pane-title">预设</h2>
+          <span id="preset-status" class="form-status" role="status"></span>
+          <button id="btn-new" class="btn ghost small" type="button">新建</button>
+        </div>
+        <ul id="preset-list" class="scripts" data-kind="preset" aria-label="已保存的预设"></ul>
+
+        <div class="pane-head">
+          <h2 class="pane-title">预设内容</h2>
+        </div>
+
+        <form id="preset-form" class="config-grid">
+
+          <label class="field span-2">
+            <span class="field-label">名称（留空就用镜像文件名）</span>
+            <input id="preset-name" type="text" autocomplete="off" placeholder="比如 RK3576 boot">
+          </label>
+
+          <div class="field span-2">
+            <label class="field-label" for="preset-image">镜像文件</label>
+            <span class="field-inline">
+              <input id="preset-image" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="~/rk3576_r8/kernel-6.1/boot.img">
+              <button id="btn-browse" class="btn ghost small" type="button">浏览…</button>
+            </span>
+            <span class="hint" id="image-info" role="status"></span>
+          </div>
+
+          <label class="field span-2">
+            <span class="field-label">推送目录（设备上）</span>
+            <input id="preset-pushdir" type="text" autocomplete="off" spellcheck="false">
+          </label>
+
+          <label class="field span-2">
+            <span class="field-label">写入目标（设备上的块设备）</span>
+            <input id="preset-target" type="text" autocomplete="off" spellcheck="false">
+          </label>
+
+          <label class="check span-2">
+            <input id="preset-reboot" type="checkbox" checked> 写入完成后重启设备
+          </label>
+
+          <div class="form-actions span-2">
+            <button id="btn-save" class="btn primary" type="submit">保存预设</button>
+            <button id="btn-delete" class="btn danger" type="button" disabled>删除</button>
+            <span id="form-status" class="form-status" role="status"></span>
+          </div>
+        </form>
+
+        <p class="hint">镜像不会复制进程序目录，这里只记录路径；文件被移走或删掉后要重新选。
+          推送目录和写入目标只能用 / 开头的绝对路径。</p>
+
+      </section>
+
+      <section class="pane pane-log">
+        <div class="pane-head">
+          <h2 class="pane-title">日志</h2>
+          <div class="pane-tools">
+            <label class="check small"><input id="follow" type="checkbox" checked> 跟随最新</label>
+            <button id="btn-clear" class="btn ghost small" type="button">清空</button>
+          </div>
+        </div>
+        <div id="log" class="log" role="log" aria-label="烧写日志"></div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- 镜像浏览器：服务端列目录，只返回路径，不搬文件 -->
+<div class="picker" id="picker" hidden role="dialog" aria-modal="true" aria-labelledby="picker-title">
+  <div class="picker-panel">
+    <div class="pane-head">
+      <h2 class="pane-title" id="picker-title">选择镜像文件</h2>
+      <button id="picker-close" class="btn ghost small" type="button">关闭</button>
+    </div>
+
+    <div class="picker-tools">
+      <button id="picker-up" class="btn ghost small" type="button">上一级</button>
+      <button id="picker-home" class="btn ghost small" type="button">主目录</button>
+      <label class="check small"><input id="picker-all" type="checkbox"> 显示全部文件</label>
+    </div>
+
+    <input id="picker-path" class="picker-path" type="text" autocomplete="off"
+           spellcheck="false" aria-label="当前目录">
+
+    <div id="picker-error" class="picker-error" role="status"></div>
+    <ul id="picker-list" class="picker-list" aria-label="目录内容"></ul>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/shell.js"></script>
+<script src="/static/replace-image.js"></script>
+</body>
+</html>

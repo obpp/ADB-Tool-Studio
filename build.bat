@@ -1,7 +1,7 @@
 @echo off
 chcp 936 >nul
 REM ===========================================================================
-REM  把 my-adb-app 打包成 Windows 桌面 exe。
+REM  把 ADB-Tool-Studio 打包成 Windows 桌面 exe。
 REM
 REM    build.bat          普通打包，单文件 exe
 REM    build.bat dir      出文件夹而不是单文件：改代码后重打快得多，
@@ -74,9 +74,9 @@ if errorlevel 1 goto :fail
 echo.
 echo ===========================================================================
 if "%MYADB_ONEFILE%"=="1" (
-    echo  完成： dist\my-adb-app.exe
+    echo  完成： dist\ADB-Tool-Studio.exe
 ) else (
-    echo  完成： dist\my-adb-app\my-adb-app.exe
+    echo  完成： dist\ADB-Tool-Studio\ADB-Tool-Studio.exe
 )
 echo.
 echo  下一步：
@@ -102,15 +102,21 @@ REM 全跑完了，等于白等一场。所以这里先把进程关掉、再把旧 exe 删一次，
 REM 有问题当场就说，别拖到最后。
 set "KILLED=0"
 set "LOCKED=0"
+taskkill /f /im ADB-Tool-Studio.exe >nul 2>nul
+if not errorlevel 1 set "KILLED=1"
+REM 改名前的旧 exe 也可能还缩在托盘里，一起关掉
 taskkill /f /im my-adb-app.exe >nul 2>nul
 if not errorlevel 1 set "KILLED=1"
 if "%KILLED%"=="1" (
-    echo     发现 my-adb-app.exe 还在跑，已经关掉它。
+    echo     发现 ADB-Tool-Studio.exe 还在跑，已经关掉它。
     echo     多半是之前双击开的那个缩在托盘里没退。
     ping -n 3 127.0.0.1 >nul
 ) else (
     echo     没有实例在跑。
 )
+call :delstale "dist\ADB-Tool-Studio.exe"
+call :delstale "dist\ADB-Tool-Studio\ADB-Tool-Studio.exe"
+REM 改名前的产物，留着只会让人双击错文件
 call :delstale "dist\my-adb-app.exe"
 call :delstale "dist\my-adb-app\my-adb-app.exe"
 if "%LOCKED%"=="1" exit /b 1
@@ -132,7 +138,7 @@ exit /b 0
 :wrongdir
 echo.
 echo   [错误] 当前目录不对，没找到 build.spec。
-echo   本脚本要在 my-adb-desktop 根目录下跑，当前是：%CD%
+echo   本脚本要在 ADB-Tool-Studio 根目录下跑，当前是：%CD%
 echo.
 pause
 exit /b 1
@@ -160,7 +166,7 @@ exit /b 1
 
 :locked
 echo.
-echo   [错误] dist\my-adb-app.exe 删不掉，有东西占着它。
+echo   [错误] dist\ADB-Tool-Studio.exe 删不掉，有东西占着它。
 echo.
 echo   最常见的就是它自己还在跑：双击开的那个 exe 缩在托盘里没退。
 echo   Windows 不允许删掉正在运行的 exe，PyInstaller 最后一步就会报
@@ -168,7 +174,7 @@ echo   PermissionError [WinError 5] 拒绝访问。
 echo.
 echo   解决：
 echo     1. 看屏幕右下角的托盘图标，右键 - 退出
-echo     2. 还不行就 Ctrl+Shift+Esc 打开任务管理器，结束 my-adb-app.exe
+echo     2. 还不行就 Ctrl+Shift+Esc 打开任务管理器，结束 ADB-Tool-Studio.exe
 echo     3. 都不行就重启一次，或者把项目拷到本地盘再打
 echo.
 echo   然后重跑本脚本就行 —— PyInstaller 的分析缓存还在，很快。

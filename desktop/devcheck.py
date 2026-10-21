@@ -107,7 +107,7 @@ def main():
         "（必须用 pythonw 跑才有意义 —— 普通 python.exe 有控制台，两组都不会闪）",
     ]
     path = write_log(lines)
-    message_box("my-adb-app 黑框检查",
+    message_box("ADB Tool Studio 黑框检查",
                 "\n".join(lines[3:]) + ("\n\n日志: %s" % path if path else ""))
     return 0
 
