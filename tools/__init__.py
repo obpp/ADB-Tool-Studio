@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""my-adb-app 的功能模块。
+"""ADB Tool Studio 的功能模块。
 
 每个模块导出一个 Tool 子类，在 server.py 的 TOOLS 列表里登记即可出现在一级页面。
 """

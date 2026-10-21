@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""my-adb-app 的工具基类。
+"""ADB Tool Studio 的工具基类。
 
 每个功能都是一个 Tool 子类，各自带：
   * 一份配置   config/<id>.json

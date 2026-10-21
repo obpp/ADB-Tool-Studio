@@ -61,7 +61,7 @@ def data_dir():
     target = install_dir()
     if not _can_write(target):
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
-        target = os.path.join(base, "my-adb-app")
+        target = os.path.join(base, "ADB-Tool-Studio")
         os.makedirs(target, exist_ok=True)
     _data_dir = target
     return _data_dir

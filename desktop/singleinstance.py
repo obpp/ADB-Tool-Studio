@@ -11,7 +11,7 @@
 
 import sys
 
-_MUTEX_NAME = "my-adb-app-single-instance"
+_MUTEX_NAME = "ADB-Tool-Studio-single-instance"
 _ERROR_ALREADY_EXISTS = 183
 
 _handle = None

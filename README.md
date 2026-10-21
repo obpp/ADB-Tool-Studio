@@ -45,7 +45,7 @@ build.bat
 
 它会建一个独立的虚拟环境 `.venv-build`（**别在全局环境里打** ——
 PyInstaller 会把当前环境扫得到的包全塞进 exe，打出来又大又杂），
-装依赖、生成图标、打包。产物在 `dist\my-adb-app.exe`。
+装依赖、生成图标、打包。产物在 `dist\ADB-Tool-Studio.exe`。
 
 ### 打包的三种方式
 
@@ -64,26 +64,26 @@ build.bat clean     清掉 PyInstaller 缓存重打
 
 ### 打包前会先关掉正在跑的实例
 
-`build.bat` 的第 5 步会自动 `taskkill` 掉正在跑的 `my-adb-app.exe`，然后把
-`dist\my-adb-app.exe` 删一次试试还占不占得住。看到这两行是正常的：
+`build.bat` 的第 5 步会自动 `taskkill` 掉正在跑的 `ADB-Tool-Studio.exe`，然后把
+`dist\ADB-Tool-Studio.exe` 删一次试试还占不占得住。看到这两行是正常的：
 
 ```
 [5/6] 关掉正在跑的实例 ...
-     发现 my-adb-app.exe 还在跑，已经关掉它。
+     发现 ADB-Tool-Studio.exe 还在跑，已经关掉它。
 ```
 
 **为什么要这么干**：Windows 不允许删掉正在运行的 exe。双击开着的那个程序缩在托盘里
 没退的话，PyInstaller 会在**最后一步**（分析全跑完之后）才撞上这件事，报：
 
 ```
-PermissionError: [WinError 5] 拒绝访问。: '...\dist\my-adb-app.exe'
+PermissionError: [WinError 5] 拒绝访问。: '...\dist\ADB-Tool-Studio.exe'
 ```
 
 那不是代码有问题，就是文件被自己占着。关掉正在跑的那个实例就好，
 而且重跑很快 —— 分析结果都缓存着，只有最后的组装那一步重来。
 
 真关不掉（比如被别的用户启动着、或者杀软咬着不放）脚本会提前停下来说清楚，
-不会让你白等一场。手动去任务管理器结束 `my-adb-app.exe` 再跑一遍就行。
+不会让你白等一场。手动去任务管理器结束 `ADB-Tool-Studio.exe` 再跑一遍就行。
 
 ## 开发时怎么快速验证（别打包一次测一次）
 
@@ -158,7 +158,7 @@ ADB-Tool-Studio/
 | | 只读资源（static/、icon.ico） | 可写数据（config/、logs/） |
 |---|---|---|
 | 源码模式 | 项目目录 | 项目目录 |
-| 打包后 | 包里的 `sys._MEIPASS` | **exe 旁边**；写不进去（比如装在 Program Files）才退到 `%APPDATA%\my-adb-app\` |
+| 打包后 | 包里的 `sys._MEIPASS` | **exe 旁边**；写不进去（比如装在 Program Files）才退到 `%APPDATA%\ADB-Tool-Studio\` |
 
 日志在 `<可写数据目录>\logs\app.log`。桌面版没有控制台，**启动失败第一件事就是看它**，
 日志超过 512KB 会轮转成 `app.log.1`。

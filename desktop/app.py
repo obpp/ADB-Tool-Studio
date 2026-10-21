@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""my-adb-app 桌面版入口：内嵌服务 + 原生窗口 + 托盘。
+"""ADB Tool Studio 桌面版入口：内嵌服务 + 原生窗口 + 托盘。
 
 跟网页版的关系只有一条：这里是**调用方**。server.py 没有被替代 ——
 AppServer 起的是同一个 Handler、同一份 registry、同一套 static/ 页面，
@@ -28,7 +28,7 @@ import server as webapp                           # noqa: E402
 from desktop import autostart, singleinstance     # noqa: E402
 from desktop.tray import Tray                     # noqa: E402
 
-APP_TITLE = "my-adb-app"
+APP_TITLE = "ADB Tool Studio"
 LOG_MAX_BYTES = 512 * 1024
 
 # WebView2 运行时的产品 ID（微软文档里给的固定 GUID）
@@ -349,7 +349,7 @@ class DesktopApp(object):
 # --------------------------------------------------------------------------
 
 def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description="my-adb-app 桌面版")
+    parser = argparse.ArgumentParser(description="ADB Tool Studio 桌面版")
     parser.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
     parser.add_argument("--port", type=int, default=0,
                         help="监听端口，0 表示让系统挑一个空闲的（默认）")
@@ -366,7 +366,7 @@ def main(argv=None):
     if not args.force and not singleinstance.acquire():
         log("已经有一个实例在跑了，这次退出")
         message_box(APP_TITLE,
-                    "my-adb-app 已经在运行了。\n\n"
+                    "ADB Tool Studio 已经在运行了。\n\n"
                     "要打开它的窗口：看屏幕右下角的托盘图标，双击。",
                     error=False)
         return 0

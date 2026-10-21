@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""my-adb-app —— adb 相关小工具的集合。
+"""ADB Tool Studio —— adb 相关小工具的集合。
 
 所有功能共用一套外壳：左边侧边栏切换功能，右边是当前功能的控制台。
 / 直接进第一个功能，没有单独的总览页。
@@ -71,7 +71,7 @@ registry = Registry(DATA_DIR, TOOL_CLASSES)
 class Handler(BaseHTTPRequestHandler):
 
     protocol_version = "HTTP/1.1"
-    server_version = "my-adb-app"
+    server_version = "ADB-Tool-Studio"
 
     def log_message(self, fmt, *args):
         pass                          # 别把每条静态请求都刷到控制台
@@ -364,7 +364,7 @@ def local_addresses():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="my-adb-app：adb 小工具集合")
+    parser = argparse.ArgumentParser(description="ADB Tool Studio：adb 小工具集合")
     parser.add_argument("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
     parser.add_argument("--port", type=int, default=8765,
                         help="监听端口（默认 8765；0 = 让系统随便挑一个空闲的）")
@@ -373,7 +373,7 @@ def main():
     server = AppServer(args.host, args.port)
 
     exposing = args.host not in ("127.0.0.1", "localhost")
-    print("my-adb-app 已启动")
+    print("ADB Tool Studio 已启动")
     for tool in registry.all():
         print("  - %-14s %s  (config/%s.json)" % (tool.name, tool.desc, tool.id))
     print()

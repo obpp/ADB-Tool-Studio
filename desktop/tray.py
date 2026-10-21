@@ -65,7 +65,7 @@ class Tray(object):
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("退出", self._on_quit),
         )
-        self.icon = pystray.Icon("my-adb-app", image, "my-adb-app", menu)
+        self.icon = pystray.Icon("ADB-Tool-Studio", image, "ADB Tool Studio", menu)
         self.thread = threading.Thread(target=self._run, name="tray")
         self.thread.daemon = True
         self.thread.start()
@@ -87,7 +87,7 @@ class Tray(object):
         except Exception:
             pass
 
-    def notify(self, message, title="my-adb-app"):
+    def notify(self, message, title="ADB Tool Studio"):
         if self.icon is None:
             return
         try:
