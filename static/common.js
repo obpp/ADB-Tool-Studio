@@ -130,7 +130,7 @@ window.ADB = (function () {
     }
   }
 
-  LogConsole.prototype.append = function (entry) {
+  LogConsole.prototype._line = function (entry) {
     var line = document.createElement('div');
     line.className = 'line';
     line.setAttribute('data-level', entry.level);
@@ -153,16 +153,37 @@ window.ADB = (function () {
     line.appendChild(ts);
     line.appendChild(tag);
     line.appendChild(msg);
-    this.el.appendChild(line);
+    return line;
+  };
 
+  LogConsole.prototype._trim = function () {
     while (this.el.childElementCount > this.max) {
       this.el.removeChild(this.el.firstElementChild);
     }
+  };
+
+  LogConsole.prototype._scroll = function () {
     if (!this.follow || this.follow.checked) this.el.scrollTop = this.el.scrollHeight;
   };
 
+  LogConsole.prototype.append = function (entry) {
+    this.el.appendChild(this._line(entry));
+    this._trim();
+    this._scroll();
+  };
+
+  // 打开页面时一次补几百条历史：攒到一个 fragment 里再挂上，
+  // 只做一次 trim / 滚动。逐条 append 的话每一条都会触发一次重排，
+  // 日志多的页面（always-adb）切换过来就会卡一下。
   LogConsole.prototype.appendAll = function (entries) {
-    (entries || []).forEach(this.append, this);
+    if (!entries || !entries.length) return;
+    var frag = document.createDocumentFragment();
+    for (var i = 0; i < entries.length; i++) {
+      frag.appendChild(this._line(entries[i]));
+    }
+    this.el.appendChild(frag);
+    this._trim();
+    this._scroll();
   };
 
   LogConsole.prototype.clear = function () { this.el.textContent = ''; };

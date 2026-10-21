@@ -27,6 +27,10 @@
 
   function badgeFor(s) {
     var extra = s.extra || {};
+    // 停掉之后端口占用就不该再顶在徽标上 —— 输入框下面的红字还留着，照样看得见
+    if (extra.blockedPort && s.status !== 'idle') {
+      return { tone: 'error', icon: '⚠', text: '远程端口 ' + extra.blockedPort + ' 被占用' };
+    }
     if (s.status === 'reconnecting') {
       return { tone: 'warn', icon: '↻', text: '重连中' };
     }
@@ -70,6 +74,35 @@
     var running = s.status !== 'idle';
     $('#btn-start').disabled = running;
     $('#btn-stop').disabled = !running;
+
+    updatePortHint(extra);
+  }
+
+  /* 远程端口不是 5037 时，服务端 adb 必须设 ANDROID_ADB_SERVER_PORT；
+     端口绑定失败时，优先提示换一个端口。 */
+  function updatePortHint(extra) {
+    var el = $('#port-hint');
+    if (!el) return;
+    extra = extra || (state && state.extra) || {};
+    var port = ADB.numberValue('#cfg-remoteport', 5037);
+    var blocked = Number(extra.blockedPort) || 0;
+
+    el.hidden = false;
+    if (blocked && blocked === port) {
+      var suggest = port < 65535 ? port + 1 : port - 1;
+      el.setAttribute('data-tone', 'error');
+      el.textContent = '端口 ' + port + ' 绑定失败（多半被占用）。改一个再启动，比如 ' +
+        suggest + '；服务端要同步 export ANDROID_ADB_SERVER_PORT=' + suggest;
+      return;
+    }
+
+    el.removeAttribute('data-tone');
+    if (port === 5037) {
+      el.hidden = true;
+      el.textContent = '';
+      return;
+    }
+    el.textContent = '服务端 adb 要连这个端口：export ANDROID_ADB_SERVER_PORT=' + port;
   }
 
   setInterval(function () {
@@ -153,10 +186,12 @@
   form.addEventListener('input', function () {
     cfgDirty = true;
     schedulePreview();
+    updatePortHint();
   });
   form.addEventListener('change', function () {
     cfgDirty = true;
     schedulePreview();
+    updatePortHint();
   });
 
   form.addEventListener('submit', function (ev) {

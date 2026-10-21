@@ -18,6 +18,9 @@ class AlwaysAdbTool(Tool):
     desc = "反复把 force_adb 设为 1，成功后 root + sync，隔一段时间再来一轮"
     page = "always-adb"
     icon = "∞"
+    # 失败重试时每秒就有几条日志，留 500 条会让打开页面时重放很久；
+    # 200 条够看出最近发生了什么，失败次数另有 stats 统计，不会丢。
+    history_limit = 200
 
     def __init__(self, app_dir):
         self.devices = []
