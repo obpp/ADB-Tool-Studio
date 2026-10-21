@@ -92,11 +92,18 @@ def problem(rc, out):
 
 
 def parse_devices(output):
-    """解析 `adb devices -l` 的输出。"""
+    """解析 `adb devices -l` 的输出。
+
+    不能简单地跳过第一行：adb server 没起来的时候，它会先打两行
+    `* daemon not running...` / `* daemon started successfully`，
+    表头就被挤到第三行了。按行判断比按下标靠谱。
+    """
     devices = []
-    for line in (output or "").splitlines()[1:]:
+    for line in (output or "").splitlines():
         line = line.strip()
         if not line or line.startswith("*"):
+            continue
+        if line.lower().startswith("list of devices"):
             continue
         parts = line.split()
         if len(parts) < 2:
@@ -122,3 +129,19 @@ def list_devices(adb_path, serial, timeout=10.0):
     if rc != 0:
         return [], (out.strip() or ("adb 返回码 %s" % rc))
     return parse_devices(out), ""
+
+
+def pick_serial(devices, wanted, error=""):
+    """从设备列表里挑一台。返回 (serial, 错误说明)。
+
+    指定了就用指定的；没指定时只有「恰好一台在线」才敢自动选 ——
+    多台同时在线时替用户挑一台，是替人做决定的坑。
+    """
+    if wanted:
+        return wanted, ""
+    online = [d for d in devices if d["state"] == "device"]
+    if len(online) == 1:
+        return online[0]["serial"], ""
+    if not online:
+        return "", "没有在线设备（%s）" % (error or "检查数据线和 USB 调试授权")
+    return "", "%d 台设备同时在线，请先在参数里选一台" % len(online)

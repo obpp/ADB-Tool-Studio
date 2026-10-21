@@ -1,3 +1,11 @@
 __pycache__/
 build/
 dist/
+
+# 运行时数据：导入的脚本，以及脚本库清单
+scripts/
+config/script_runner.scripts.json
+
+# 运行时数据：镜像预设（镜像本身不复制，这里只有路径）
+config/replace_image.json
+config/replace_image.presets.json

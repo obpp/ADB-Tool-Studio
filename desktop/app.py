@@ -131,6 +131,42 @@ def webview2_installed():
 
 # --------------------------------------------------------------------------
 
+class PageApi(object):
+    """暴露给页面 JS 的原生能力（`window.pywebview.api`）。
+
+    网页版里没有这座桥 —— 浏览器不会把选中文件的完整路径告诉页面。
+    前端先看桥在不在，不在就退回服务端的目录浏览器。
+
+    注意：这个对象会被 pywebview 递归 introspection（util.get_functions），
+    所以**别往上面挂窗口、GUI 之类的引用** —— 它会把整个对象树摸一遍，
+    碰到 .NET 控件属性就可能把进程带崩。窗口从 webview.windows 里现取。
+    """
+
+    def pick_image(self, directory=""):
+        """弹系统的选文件对话框，返回选中的完整路径；用户取消返回 None。"""
+        import webview
+        if not webview.windows:
+            return None
+        window = webview.windows[0]
+        directory = os.path.expanduser(directory) if isinstance(directory, str) else ""
+        if not directory or not os.path.isdir(directory):
+            directory = ""
+        try:
+            paths = window.create_file_dialog(
+                webview.FileDialog.OPEN,
+                directory=directory,
+                allow_multiple=False,
+                file_types=("镜像文件 (*.img;*.bin;*.raw;*.iso)",
+                            "所有文件 (*.*)"),
+            )
+        except Exception as exc:
+            log("打开文件对话框失败: %r" % (exc,))
+            return None
+        if not paths:
+            return None
+        return paths[0]
+
+
 class DesktopApp(object):
 
     def __init__(self, host, port, minimized):
@@ -178,10 +214,12 @@ class DesktopApp(object):
         # 开机自启时不弹窗；但没有托盘的话缩进去就再也叫不出来了
         hidden = self.start_minimized and self.tray.available
 
+        page_api = PageApi()
         try:
             self.window = webview.create_window(
                 APP_TITLE,
                 self.httpd.url,
+                js_api=page_api,
                 width=1120, height=840,
                 min_size=(900, 620),
                 hidden=hidden,

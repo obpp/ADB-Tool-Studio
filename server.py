@@ -26,7 +26,7 @@ import socket
 import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import apppaths
 
@@ -95,19 +95,27 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self):
+    # 请求体上限。脚本导入是唯一需要大 body 的地方，其余接口都是几百字节。
+    MAX_BODY = 2 * 1024 * 1024 + 4096
+
+    def _read_body(self):
+        """把请求体整个读成 bytes。太大返回 None。
+
+        两个都不能省的细节：
+          * HTTP/1.1 keep-alive 下必须把 Content-Length 声明的字节读干净，
+            不然后续字节会被当成下一个请求的请求行，整条连接就错乱了。
+          * 超限时没法读完，那就把连接标成用完即关，避免残留污染下一条请求。
+        """
         try:
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = 0
         if length <= 0:
-            return {}
-        raw = self.rfile.read(length)
-        try:
-            data = json.loads(raw.decode("utf-8"))
-        except (ValueError, UnicodeDecodeError):
-            return {}
-        return data if isinstance(data, dict) else {}
+            return b""
+        if length > self.MAX_BODY:
+            self.close_connection = True
+            return None
+        return self.rfile.read(length)
 
     def _serve_static(self, rel):
         safe = os.path.normpath(rel).lstrip("/\\")
@@ -177,21 +185,37 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_text("404 Not Found", 404)
 
     def do_POST(self):
-        path = urlparse(self.path).path
-        parts = [p for p in path.split("/") if p]
+        parsed_url = urlparse(self.path)
+        parts = [p for p in parsed_url.path.split("/") if p]
 
         if parts[:1] != ["api"] or len(parts) < 3:
+            self.close_connection = True      # body 没读，这条连接不能再复用
             return self._send_text("404 Not Found", 404)
 
         tool_id, action = parts[1], "/".join(parts[2:])
         tool = registry.get(tool_id)
         if tool is None:
+            self.close_connection = True
             return self._send_json({"error": "没有这个工具: %s" % tool_id}, 404)
 
-        body = self._read_json()
+        raw = self._read_body()
+        if raw is None:
+            return self._send_json({"ok": False, "error": "请求体太大"}, 413)
+
+        # 大多数接口是 JSON；脚本导入直接传原始字节，这里解析失败就当没有
+        data = {}
+        if raw:
+            try:
+                decoded = json.loads(raw.decode("utf-8"))
+                if isinstance(decoded, dict):
+                    data = decoded
+            except (ValueError, UnicodeDecodeError):
+                pass
+
+        query = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
 
         if action == "start":
-            ok, msg = tool.start(body)
+            ok, msg = tool.start(data)
             return self._send_json(
                 {"ok": ok, "message": msg, "state": tool.snapshot()},
                 200 if ok else 409)
@@ -203,7 +227,7 @@ class Handler(BaseHTTPRequestHandler):
                 200 if ok else 409)
 
         if action == "config":
-            tool.config = tool.sanitize_config(body, base=tool.config)
+            tool.config = tool.sanitize_config(data, base=tool.config)
             try:
                 tool.save_config()
                 saved = True
@@ -220,10 +244,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"ok": True})
 
         if action == "preview" and hasattr(tool, "preview"):
-            result = tool.preview(body)
+            result = tool.preview(data)
             if result is None:
                 return self._send_json({"error": "这个工具不支持预览"}, 404)
             return self._send_json(result)
+
+        # 工具自己的动作（导入脚本之类）。返回 None 表示它也不认识这个 action。
+        # 这样加功能不用再回来改这里。
+        handler = getattr(tool, "api", None)
+        if handler is not None:
+            result = handler(action, raw, data, query)
+            if result is not None:
+                payload, status = result
+                return self._send_json(payload, status)
 
         return self._send_text("404 Not Found", 404)
 

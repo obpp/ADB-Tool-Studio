@@ -5,9 +5,12 @@
 """
 
 from tools.always_adb import AlwaysAdbTool
+from tools.replace_image import ReplaceImageTool
+from tools.script_runner import ScriptRunnerTool
 from tools.ssh_tunnel import SshTunnelTool
 
-# 一级页面按这个顺序展示
-TOOL_CLASSES = (AlwaysAdbTool, SshTunnelTool)
+# 侧边栏按这个顺序展示
+TOOL_CLASSES = (AlwaysAdbTool, SshTunnelTool, ScriptRunnerTool, ReplaceImageTool)
 
-__all__ = ["AlwaysAdbTool", "SshTunnelTool", "TOOL_CLASSES"]
+__all__ = ["AlwaysAdbTool", "SshTunnelTool", "ScriptRunnerTool",
+           "ReplaceImageTool", "TOOL_CLASSES"]

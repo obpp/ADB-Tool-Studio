@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>脚本执行 · ADB Tool Studio</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-tool="script_runner">
+
+<div class="app">
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+
+    <header class="nameplate">
+      <div class="nameplate-top">
+        <span id="badge" class="badge" data-tone="idle" aria-live="polite">
+          <span class="badge-icon" aria-hidden="true">■</span><span class="badge-text">已停止</span>
+        </span>
+        <h1>脚本执行</h1>
+        <span class="uptime" id="meta-uptime">—</span>
+      </div>
+
+      <div class="readout" role="group" aria-label="执行统计">
+        <span class="ro"><span class="ro-k">选中脚本</span><span class="ro-v" id="meta-script">—</span></span>
+        <span class="ro"><span class="ro-k">设备</span><span class="ro-v" id="meta-target">—</span></span>
+        <span class="ro"><span class="ro-k">已执行</span><span class="ro-v" id="kpi-runs">0</span></span>
+        <span class="ro"><span class="ro-k">失败</span><span class="ro-v" id="kpi-failures">0</span></span>
+        <span class="ro"><span class="ro-k">上次退出码</span><span class="ro-v" id="meta-exit">—</span></span>
+        <span class="ro"><span class="ro-k">上次耗时</span><span class="ro-v" id="meta-elapsed">—</span></span>
+      </div>
+
+      <div class="actions">
+        <button id="btn-run" class="btn primary" type="button">执行选中脚本</button>
+        <button id="btn-stop" class="btn danger" type="button" disabled>停止</button>
+      </div>
+    </header>
+
+    <div class="rule"></div>
+
+    <div class="workspace">
+
+      <section class="pane pane-params">
+
+        <div class="pane-head">
+          <h2 class="pane-title">参数</h2>
+        </div>
+
+        <form id="config-form" class="config-grid">
+
+          <label class="field span-2">
+            <span class="field-label">adb 路径</span>
+            <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
+          </label>
+
+          <div class="field span-2">
+            <label class="field-label" for="cfg-serial">目标设备</label>
+            <span class="field-inline">
+              <select id="cfg-serial"></select>
+              <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
+            </span>
+          </div>
+
+          <label class="field">
+            <span class="field-label">远程目录</span>
+            <input id="cfg-remote" type="text" autocomplete="off" spellcheck="false">
+          </label>
+
+          <label class="field">
+            <span class="field-label">超时（秒）</span>
+            <input id="cfg-timeout" type="number" min="5" max="3600" step="1">
+          </label>
+
+          <div class="form-actions span-2">
+            <button class="btn primary" type="submit">保存参数</button>
+            <span id="cfg-status" class="form-status" role="status"></span>
+          </div>
+        </form>
+
+        <div class="pane-head">
+          <h2 class="pane-title">脚本库</h2>
+          <span id="script-status" class="form-status" role="status"></span>
+          <button id="btn-import" class="btn ghost small" type="button">导入脚本…</button>
+        </div>
+        <input id="file-input" type="file" hidden>
+        <ul id="script-list" class="scripts" aria-label="已导入的脚本">
+          <li class="dev-empty">还没有脚本，点「导入脚本…」选一个</li>
+        </ul>
+        <p class="hint">也可以把文件直接拖到这里。导入时会统一换行符（CRLF → LF）。</p>
+
+      </section>
+
+      <section class="pane pane-log">
+        <div class="pane-head">
+          <h2 class="pane-title">日志</h2>
+          <div class="pane-tools">
+            <label class="check small"><input id="follow" type="checkbox" checked> 跟随最新</label>
+            <button id="btn-clear" class="btn ghost small" type="button">清空</button>
+          </div>
+        </div>
+        <div id="log" class="log" role="log" aria-label="运行日志"></div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/shell.js"></script>
+<script src="/static/scripts.js"></script>
+</body>
+</html>
