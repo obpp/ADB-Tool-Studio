@@ -54,7 +54,6 @@
 
     $('#meta-tunnel').textContent = extra.remoteSpec
       ? extra.remoteSpec + ' → ' + extra.localSpec : '—';
-    $('#meta-connected').textContent = ADB.clockTime(stats.lastConnectedAt);
     $('#meta-exit').textContent = (stats.lastExitCode === null ||
       stats.lastExitCode === undefined) ? '—' : stats.lastExitCode;
 

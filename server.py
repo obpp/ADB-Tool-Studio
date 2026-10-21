@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 """my-adb-app —— adb 相关小工具的集合。
 
-一级页面（/）列出所有功能，二级页面是每个功能自己的控制台。
+所有功能共用一套外壳：左边侧边栏切换功能，右边是当前功能的控制台。
+/ 直接进第一个功能，没有单独的总览页。
 
 * 后端：Python 3 标准库（http.server + ThreadingHTTPServer + SSE），零第三方依赖
 * 前端：static/ 下的纯 HTML/CSS/JS，无构建步骤
@@ -138,8 +139,13 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         parts = [p for p in path.split("/") if p]
 
+        # 首页 = 第一个注册的工具。没有总览页了，打开就直接进一个通道，
+        # 免得先看一眼空目录再点一下。
         if path in ("/", "/index.html"):
-            return self._serve_static("index.html")
+            tools = registry.all()
+            if not tools:
+                return self._send_text("没有注册任何工具", 500)
+            return self._serve_static(tools[0].page + ".html")
 
         if parts[:1] == ["static"]:
             return self._serve_static("/".join(parts[1:]))

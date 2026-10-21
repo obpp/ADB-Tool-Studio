@@ -227,7 +227,7 @@ class Tool(object):
         return snap
 
     def summary(self):
-        """一级页面的卡片数据。"""
+        """侧边栏 / 工具列表用的概要数据（不含历史、不摊开配置）。"""
         with self.lock:
             return {
                 "id": self.id,
@@ -236,6 +236,8 @@ class Tool(object):
                 "page": self.page,
                 "icon": self.icon,
                 "status": self.status,
+                "startedAt": self.started_at,
+                "uptime": self._uptime(),
                 "brief": self.brief(),
                 "stats": dict(self.stats),
                 "extra": self.extra(),

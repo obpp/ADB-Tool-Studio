@@ -55,7 +55,7 @@
     var tile = $('#kpi-fail-tile');
     if (fails === 0) {
       tile.setAttribute('data-tone', 'ok');
-      $('#kpi-fails-hint').textContent = '设备正常';
+      $('#kpi-fails-hint').textContent = '';
     } else if (fails < 3) {
       tile.setAttribute('data-tone', 'warning');
       $('#kpi-fails-hint').textContent = '重试中';
@@ -89,48 +89,56 @@
     el.textContent = ADB.duration(Date.now() / 1000 - state.startedAt);
   }, 1000);
 
-  /* ---------------- 设备表 ---------------- */
+  /* ---------------- 设备列表 ---------------- */
+
+  // 只有 state=device 才算真的能用；其余状态标成警告色，眼睛一扫就能看出哪台有问题
+  function deviceTone(st) {
+    if (st === 'device') return 'ok';
+    if (st === 'unauthorized' || st === 'offline') return 'warn';
+    return 'error';
+  }
 
   function renderDevices() {
-    var tbody = $('#device-rows');
-    tbody.textContent = '';
+    var list = $('#device-list');
+    if (!list) return;
+    list.textContent = '';
+
     if (!devices.length) {
-      var tr = document.createElement('tr');
-      var td = document.createElement('td');
-      td.colSpan = 4;
-      td.className = 'empty';
-      td.textContent = '没有检测到设备（请检查数据线与 USB 调试授权）';
-      tr.appendChild(td);
-      tbody.appendChild(tr);
+      var empty = document.createElement('li');
+      empty.className = 'dev-empty';
+      empty.textContent = '没有检测到设备。检查数据线和 USB 调试授权。';
+      list.appendChild(empty);
       return;
     }
+
     devices.forEach(function (d) {
-      var tr = document.createElement('tr');
+      var li = document.createElement('li');
+      li.className = 'dev';
 
-      var tdSerial = document.createElement('td');
-      tdSerial.textContent = d.serial;
+      var lamp = document.createElement('span');
+      lamp.className = 'lamp';
+      lamp.setAttribute('data-tone', deviceTone(d.state));
 
-      var tdState = document.createElement('td');
-      var wrap = document.createElement('span');
-      wrap.className = 'dev-state';
-      wrap.setAttribute('data-state', d.state);
-      var dot = document.createElement('span');
-      dot.className = 'dot';
-      wrap.appendChild(dot);
-      wrap.appendChild(document.createTextNode(DEVICE_STATE[d.state] || d.state));
-      tdState.appendChild(wrap);
+      var serial = document.createElement('span');
+      serial.className = 'dev-serial';
+      serial.textContent = d.serial;
 
-      var tdModel = document.createElement('td');
-      tdModel.textContent = d.model || '—';
+      var st = document.createElement('span');
+      st.className = 'dev-state';
+      st.textContent = DEVICE_STATE[d.state] || d.state;
 
-      var tdProduct = document.createElement('td');
-      tdProduct.textContent = d.product || '—';
+      var model = document.createElement('span');
+      model.className = 'dev-model';
+      model.textContent = d.model || d.product || '—';
 
-      tr.appendChild(tdSerial);
-      tr.appendChild(tdState);
-      tr.appendChild(tdModel);
-      tr.appendChild(tdProduct);
-      tbody.appendChild(tr);
+      li.title = d.serial + '\n' + st.textContent + '\n型号：' + (d.model || '—') +
+        '\n产品：' + (d.product || '—');
+
+      li.appendChild(lamp);
+      li.appendChild(serial);
+      li.appendChild(st);
+      li.appendChild(model);
+      list.appendChild(li);
     });
   }
 
