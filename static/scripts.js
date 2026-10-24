@@ -338,21 +338,25 @@
     importFile(file);
   });
 
-  // 拖放：Windows 上从资源管理器拖过来就是普通文件对象
-  var zone = $('#script-list');
-  ['dragenter', 'dragover'].forEach(function (name) {
-    zone.addEventListener(name, function (ev) {
-      ev.preventDefault();
-      zone.classList.add('is-drop');
-    });
+  // 拖放：整个脚本库下方都是投放区，不只是列表本身。
+  // dragenter / dragleave 会从子元素冒泡上来，用计数避免划过每一行时闪烁。
+  var zone = $('#script-drop');
+  var dragDepth = 0;
+  zone.addEventListener('dragenter', function (ev) {
+    ev.preventDefault();
+    dragDepth++;
+    zone.classList.add('is-drop');
   });
-  ['dragleave', 'drop'].forEach(function (name) {
-    zone.addEventListener(name, function (ev) {
-      ev.preventDefault();
-      zone.classList.remove('is-drop');
-    });
+  zone.addEventListener('dragover', function (ev) { ev.preventDefault(); });
+  zone.addEventListener('dragleave', function (ev) {
+    ev.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) zone.classList.remove('is-drop');
   });
   zone.addEventListener('drop', function (ev) {
+    ev.preventDefault();
+    dragDepth = 0;
+    zone.classList.remove('is-drop');
     var file = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
     importFile(file);
   });

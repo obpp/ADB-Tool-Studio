@@ -563,9 +563,21 @@ input:focus-visible, select:focus-visible {
 }
 
 /* 拖放落点：虚线框比整块变色更收敛 */
-.scripts.is-drop {
-  outline: 2px dashed var(--accent);
-  outline-offset: -4px;
+/* 脚本库的拖放区：填满下方剩余高度，整个区域都能接文件 */
+.pane-scripts {
+  display: flex;
+  flex-direction: column;
+}
+.script-drop {
+  flex: 1 0 auto;
+  min-height: 180px;
+  padding: 8px 10px;
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+  transition: border-color .12s, background-color .12s;
+}
+.script-drop.is-drop {
+  border-color: var(--accent);
   background: var(--accent-wash);
 }
 
