@@ -1,23 +1,26 @@
 # -*- coding: utf-8 -*-
 """替换镜像：把本地镜像推到设备上，dd 写进分区，然后重启。
 
+一个预设可以有多行「镜像 → 目标」，同一个镜像也可以写多个分区（A/B 槽）。
 流程等价于：
 
-    adb -s <序列号> shell "test -b /dev/block/by-name/boot && echo ATS_BLOCK"
-    adb -s <序列号> push ~/rk3576_r8/kernel-6.1/boot.img /mnt/ats-xxxxxxxx-boot.img
-    adb -s <序列号> shell "wc -c /mnt/ats-xxxxxxxx-boot.img"
-    adb -s <序列号> shell "dd if=/mnt/ats-xxxxxxxx-boot.img of=/dev/block/by-name/boot bs=1048576"
+    adb -s <序列号> shell "test -b /dev/block/by-name/boot_a && echo ATS_BLOCK"
+    adb -s <序列号> push ~/rk3576_r8/kernel-6.1/boot.img /mnt/ats-xxxxxxxx-1-boot.img
+    adb -s <序列号> shell "wc -c /mnt/ats-xxxxxxxx-1-boot.img"
+    adb -s <序列号> shell "dd if=/mnt/ats-xxxxxxxx-1-boot.img of=/dev/block/by-name/boot_a bs=1048576"
+    adb -s <序列号> shell "dd if=/mnt/ats-xxxxxxxx-1-boot.img of=/dev/block/by-name/boot_b bs=1048576"
     adb -s <序列号> shell sync
     adb -s <序列号> shell reboot
 
 和脚本执行的区别在「错了会变砖」，所以这里多了几道闸，任何一道不过都直接
-放弃，而且**只有 dd 成功才重启**：
+放弃，而且**只有全部 dd 成功才重启**：
 
-  * 写入目标只允许 /dev/ 下的路径，并且先 test -b 确认它真是块设备
+  * 写入目标只允许 /dev/ 下的路径（或者裸分区名，自动补成 by-name）；同一分区不能分给两个镜像
+  * 所有目标先 test -b 验一遍，再开始写 —— 别写到一半才发现 boot_b 不存在
   * 设备上有 blockdev 的话，镜像比分区大就不写
   * 推完用 wc -c 核对大小，和设备上不一致就不写
   * dd 输出里出现 No space left / I/O error 之类也按失败处理
-  * 中途按停止不会重启（但分区可能已经写了一半，日志里会明说）
+  * 中途失败或按停止不会重启（已经写进去的分区不会回滚，日志里会明说写了几个）
 
 镜像本身不进程序目录，预设里只记绝对路径 —— boot.img 动辄几十上百 MB，
 复制一份既费磁盘，改了源码目录里的文件还得再导一次。
@@ -48,10 +51,95 @@ DD_BS = 1048576
 _TARGET_RE = re.compile(r"^/dev/[A-Za-z0-9._/-]+$")
 _REMOTE_DIR_RE = re.compile(r"^/[A-Za-z0-9._/-]*$")
 
+# 只写分区名（boot_a）时补成这个前缀。大多数 Android 设备都有 by-name 目录。
+TARGET_PREFIX = "/dev/block/by-name/"
+_SHORTHAND_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
 
 def valid_target(path):
     """写入目标：/dev/ 下、只含安全字符、没有 .. 段。"""
     return bool(_TARGET_RE.match(path or "")) and ".." not in path.split("/")
+
+
+def expand_target(value):
+    """目标可以写完整路径，也可以只写分区名（boot_a）。"""
+    value = (value or "").strip()
+    if value.startswith("/"):
+        return value
+    if _SHORTHAND_RE.match(value):
+        return TARGET_PREFIX + value
+    return value
+
+
+def split_targets(value):
+    """页面传字符串（空格/逗号分隔）或列表，统一成去重后的目标列表。"""
+    if isinstance(value, str):
+        parts = re.split(r"[\s,，;；]+", value.strip())
+    elif isinstance(value, (list, tuple)):
+        parts = [str(v).strip() for v in value]
+    else:
+        parts = []
+    out = []
+    for part in parts:
+        if not part:
+            continue
+        target = expand_target(part)
+        if target and target not in out:
+            out.append(target)
+    return out
+
+
+def parse_items(raw, legacy_image="", legacy_target=""):
+    """把请求里的镜像列表整理成 [{imagePath, targets}]。
+
+    返回 (items, error)。空行（还没填的新行）直接跳过；填了一半就报错，
+    免得用户以为保存了、执行时才发现少东西。
+    """
+    if raw is None:
+        raw = [{"imagePath": legacy_image, "targets": legacy_target}]
+    if not isinstance(raw, list):
+        return [], "镜像列表格式不对"
+
+    items = []
+    seen = {}          # 目标 -> 镜像，用来挡住两个镜像抢同一个分区
+    for idx, row in enumerate(raw, 1):
+        if not isinstance(row, dict):
+            continue
+        image = str(row.get("imagePath") or "").strip()
+        targets = split_targets(row.get("targets", row.get("target")))
+        if not image and not targets:
+            continue
+        if not image:
+            return [], "第 %d 行还没选镜像" % idx
+        if not targets:
+            return [], "第 %d 行没有写写入目标" % idx
+        for target in targets:
+            if not valid_target(target):
+                return [], "第 %d 行的写入目标不合法: %s" % (idx, target)
+            other = seen.get(target)
+            if other is not None and other != image:
+                return [], "写入目标 %s 同时给了两个镜像" % target
+            seen[target] = image
+        items.append({"imagePath": image, "targets": targets})
+
+    if not items:
+        return [], "至少要有一个镜像和写入目标"
+    return items, None
+
+
+def _clean_items(raw, legacy_image="", legacy_target=""):
+    """清单文件用的宽松版：保留用户填的内容，合法性交给执行前检查。"""
+    rows = raw if isinstance(raw, list) else [{
+        "imagePath": legacy_image, "targets": legacy_target}]
+    items = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        image = str(row.get("imagePath") or "").strip()
+        targets = split_targets(row.get("targets", row.get("target")))
+        if image or targets:
+            items.append({"imagePath": image, "targets": targets})
+    return items
 
 
 def valid_remote_dir(path):
@@ -91,15 +179,21 @@ def human_size(n):
     return "%.2f GB" % (n / (1024.0 * 1024.0 * 1024.0))
 
 
-def remote_name(local_path, preset_id):
-    """设备上的临时文件名。带预设 id 前缀，两个预设的 boot.img 不会互相覆盖。"""
+def remote_name(local_path, preset_id, index=0):
+    """设备上的临时文件名。带预设 id 前缀，两个预设的 boot.img 不会互相覆盖。
+
+    一个预设里有多个镜像时再带上序号：两个不同目录下的 boot.img 也不会撞名。
+    """
     base = os.path.basename(local_path or "")
     stem, ext = os.path.splitext(base)
     stem = _SAFE_REMOTE.sub("_", stem).strip("._-")
     if not re.search(r"[A-Za-z0-9]", stem):
         stem = "image"
     ext = _SAFE_REMOTE.sub("", ext)[:10]
-    return "ats-%s-%s%s" % (preset_id[:8], stem[:40], ext)
+    prefix = "ats-%s" % preset_id[:8]
+    if index:
+        prefix += "-%d" % index
+    return "%s-%s%s" % (prefix, stem[:40], ext)
 
 
 class ReplaceImageTool(Tool):
@@ -185,12 +279,14 @@ class ReplaceImageTool(Tool):
         pid = str(raw.get("id") or "").strip()
         if not pid:
             return None
+        # 老清单是单个 imagePath/target，读进来就折成一条 items
+        items = _clean_items(raw.get("items"),
+                             raw.get("imagePath", ""), raw.get("target", ""))
         return {
             "id": pid,
             "name": str(raw.get("name") or "").strip()[:60] or "未命名",
-            "imagePath": str(raw.get("imagePath") or "").strip(),
+            "items": items,
             "pushDir": str(raw.get("pushDir") or "/mnt").strip() or "/mnt",
-            "target": str(raw.get("target") or "").strip(),
             "reboot": bool(raw.get("reboot", True)),
             "addedAt": raw.get("addedAt"),
             "lastRunAt": raw.get("lastRunAt"),
@@ -291,22 +387,24 @@ class ReplaceImageTool(Tool):
         data = data if isinstance(data, dict) else {}
         pid = str(data.get("id") or "").strip()
         name = str(data.get("name") or "").strip()[:60]
-        image = str(data.get("imagePath") or "").strip()
         push_dir = str(data.get("pushDir") or "").strip() or "/mnt"
-        target = str(data.get("target") or "").strip()
         reboot = bool(data.get("reboot", True))
 
-        if not image:
-            return {"ok": False, "error": "先选一个镜像文件"}, 400
-        image = os.path.abspath(os.path.expanduser(image))
+        # 老格式（单个 imagePath/target）也认，方便已有调用方
+        items, error = parse_items(data.get("items"),
+                                   data.get("imagePath", ""), data.get("target", ""))
+        if error:
+            return {"ok": False, "error": error}, 400
+        for item in items:
+            item["imagePath"] = os.path.abspath(
+                os.path.expanduser(item["imagePath"]))
+
+        first_image = items[0]["imagePath"]
         if not name:
-            # 名称只是列表里的标签：没填就借镜像文件名，别为这个拦住保存
-            name = os.path.splitext(os.path.basename(image))[0].strip()[:60]
+            # 名称只是列表里的标签：没填就借第一个镜像的文件名
+            name = os.path.splitext(os.path.basename(first_image))[0].strip()[:60]
         if not name:
             return {"ok": False, "error": "这个镜像没有文件名，给预设起个名字吧"}, 400
-        if not valid_target(target):
-            return {"ok": False,
-                    "error": "写入目标必须是 /dev/ 下的路径，比如 /dev/block/by-name/boot"}, 400
         if not valid_remote_dir(push_dir):
             return {"ok": False,
                     "error": "推送目录必须是 / 开头的绝对路径，比如 /mnt"}, 400
@@ -329,11 +427,13 @@ class ReplaceImageTool(Tool):
                 self.presets.append(entry)
             entry.update({
                 "name": name,
-                "imagePath": image,
+                "items": items,
                 "pushDir": push_dir,
-                "target": target,
                 "reboot": reboot,
             })
+            # 老字段留着只会让两边各读各的，保存一次就清掉
+            entry.pop("imagePath", None)
+            entry.pop("target", None)
 
             try:
                 self._save_presets()
@@ -350,14 +450,16 @@ class ReplaceImageTool(Tool):
             result = dict(entry)
             presets = [dict(p) for p in self.presets]
 
-        self.log("info", "预设已保存: %s → %s" % (name, target))
+        total_targets = sum(len(item["targets"]) for item in items)
+        self.log("info", "预设已保存: %s（%d 个镜像 / %d 个分区）"
+                 % (name, len(items), total_targets))
         self.publish_state()
         return {
             "ok": True,
             "saved": saved,
             "preset": result,
             "presets": presets,
-            "exists": os.path.isfile(image),
+            "exists": all(os.path.isfile(item["imagePath"]) for item in items),
         }, 200
 
     def _api_delete(self, data):
@@ -547,29 +649,62 @@ class ReplaceImageTool(Tool):
 
     def _flash(self, cfg, preset):
         """按顺序推送、校验、dd、sync、重启。返回 (最后一条命令的返回码, 结果)。"""
-        image = os.path.abspath(os.path.expanduser(preset["imagePath"]))
-        target = preset["target"]
-        push_dir = preset["pushDir"]
+        push_dir = preset.get("pushDir") or ""
+        items = preset.get("items") or []
 
         # ---- 先校验参数，一条命令都别发 ----
-        if not valid_target(target):
-            self.log("err", "写入目标不合法: %r（必须是 /dev/ 下的路径）" % target)
-            return None, "fail"
         if not valid_remote_dir(push_dir) or push_dir.rstrip("/") in ("", "/"):
             self.log("err", "推送目录不合法: %r" % push_dir)
             return None, "fail"
+        if not items:
+            self.log("err", "这个预设里没有镜像")
+            return None, "fail"
 
-        if not os.path.isfile(image):
-            self.log("err", "镜像文件不存在: %s" % image)
-            return None, "fail"
-        try:
-            size = os.path.getsize(image)
-        except OSError as exc:
-            self.log("err", "读不了镜像文件: %s（%s）" % (image, exc))
-            return None, "fail"
-        if size <= 0:
-            self.log("err", "镜像是空文件: %s" % image)
-            return None, "fail"
+        plans = []          # [(image, size, [target, ...])]
+        sizes = {}
+        seen = {}           # target -> image，挡住两个镜像抢同一个分区
+        total = 0
+        for idx, item in enumerate(items, 1):
+            raw_image = str(item.get("imagePath") or "").strip()
+            if not raw_image:
+                self.log("err", "第 %d 个镜像没有选文件" % idx)
+                return None, "fail"
+            image = os.path.abspath(os.path.expanduser(raw_image))
+            if image not in sizes:
+                if not os.path.isfile(image):
+                    self.log("err", "镜像文件不存在: %s" % image)
+                    return None, "fail"
+                try:
+                    size = os.path.getsize(image)
+                except OSError as exc:
+                    self.log("err", "读不了镜像文件: %s（%s）" % (image, exc))
+                    return None, "fail"
+                if size <= 0:
+                    self.log("err", "镜像是空文件: %s" % image)
+                    return None, "fail"
+                sizes[image] = size
+            targets = list(item.get("targets") or [])
+            if not targets:
+                self.log("err", "第 %d 个镜像没有写写入目标: %s"
+                         % (idx, os.path.basename(image)))
+                return None, "fail"
+            for target in targets:
+                if not valid_target(target):
+                    self.log("err", "写入目标不合法: %r（必须是 /dev/ 下的路径）" % target)
+                    return None, "fail"
+                other = seen.get(target)
+                if other is not None and other != image:
+                    self.log("err", "写入目标 %s 同时给了 %s 和 %s"
+                             % (target, os.path.basename(other), os.path.basename(image)))
+                    return None, "fail"
+                seen[target] = image
+            plans.append((image, sizes[image], targets))
+            total += len(targets)
+
+        self.log("info", "准备写入 %d 个镜像到 %d 个分区：" % (len(plans), total))
+        for image, size, targets in plans:
+            self.log("info", "  %s（%s）→ %s" % (
+                os.path.basename(image), human_size(size), "、".join(targets)))
 
         # ---- 选设备 ----
         devices, _ = self.refresh_devices()
@@ -577,91 +712,110 @@ class ReplaceImageTool(Tool):
         if not serial:
             self.log("err", err)
             return None, "fail"
+        self.log("info", "目标设备 %s，推送目录 %s" % (serial, push_dir))
 
-        self.log("info", "准备写入 %s（%s）" % (os.path.basename(image), human_size(size)))
-        self.log("info", "目标设备 %s → %s，推送目录 %s" % (serial, target, push_dir))
-
-        # ---- 闸一：目标必须是块设备 ----
-        check = "test -b %s && echo ATS_BLOCK || echo ATS_NOBLOCK" % target
-        rc, text = self._run_short(cfg, serial, check, CHECK_TIMEOUT)
-        if "ATS_BLOCK" not in (text or ""):
-            self.log("err", "目标不是块设备或不可访问: %s" % target)
-            return rc, "fail"
-        self.log("ok", "目标分区存在且是块设备")
-
-        # ---- 闸二：镜像不能比分区大 ----
-        rc, text = self._run_short(cfg, serial, "blockdev --getsize64 %s" % target, CHECK_TIMEOUT)
-        match = re.match(r"\s*(\d+)\s*$", text or "")
-        if match:
-            block_size = int(match.group(1))
-            if block_size > 0 and size > block_size:
-                self.log("err", "镜像 %s 大于分区 %s（%s > %s），不写"
-                         % (human_size(size), human_size(block_size), image, target))
-                return rc, "fail"
-            self.log("info", "分区大小 %s，镜像能放得下" % human_size(block_size))
-        else:
-            self.log("warn", "拿不到分区大小（设备上没有 blockdev？），跳过这项检查")
-
-        if self.stop_event.is_set():
-            self.log("warn", "已停止，还没有推送")
-            return None, "stopped"
-
-        # ---- 推送 ----
-        remote = push_dir.rstrip("/") + "/" + remote_name(image, preset["id"])
-        self._set_stage("push")
-        rc, outcome, _ = self._exec(
-            cfg, serial, ["push", image, remote], cfg["timeout"], "推送镜像")
-        if outcome == "stopped":
-            return rc, "stopped"
-        if outcome != "ok":
-            self.log("err", "推送失败，分区没有改动")
-            return rc, "fail"
-
-        # ---- 闸三：设备上的文件大小必须和本地一致 ----
-        rc, text = self._run_short(cfg, serial, "wc -c %s" % remote, CHECK_TIMEOUT)
-        match = re.search(r"(\d+)", text or "")
-        if match:
-            remote_size = int(match.group(1))
-            if remote_size != size:
-                self.log("err", "推送后大小不一致（本地 %d 字节 / 设备 %d 字节），不写"
-                         % (size, remote_size))
-                return rc, "fail"
-            self.log("ok", "已推送 %s，大小校验一致" % remote)
-        else:
-            low = (text or "").lower()
-            for bad in ("no such file", "not found", "permission denied"):
-                if bad in low:
-                    self.log("err", "设备上读不到推送的文件，不写: %s"
-                             % (text or "").strip()[:120])
+        # ---- 闸一/二：所有目标先验一遍，任何一项不过就一条 dd 都不发 ----
+        # A/B 分区尤其要先验全：写了一半才发现 boot_b 不存在，比不写更糟。
+        pair_no = 0
+        for image, size, targets in plans:
+            for target in targets:
+                pair_no += 1
+                check = "test -b %s && echo ATS_BLOCK || echo ATS_NOBLOCK" % target
+                rc, text = self._run_short(cfg, serial, check, CHECK_TIMEOUT)
+                if "ATS_BLOCK" not in (text or ""):
+                    self.log("err", "目标 %s 不是块设备或不可访问，没有写入任何分区" % target)
                     return rc, "fail"
-            self.log("warn", "读不到设备上文件的大小，跳过校验: %s"
-                     % (text or "").strip()[:120])
 
-        if self.stop_event.is_set():
-            self.log("warn", "已停止，dd 没有执行，分区没有改动")
-            return None, "stopped"
+                rc, text = self._run_short(
+                    cfg, serial, "blockdev --getsize64 %s" % target, CHECK_TIMEOUT)
+                match = re.match(r"\s*(\d+)\s*$", text or "")
+                if match:
+                    block_size = int(match.group(1))
+                    if block_size > 0 and size > block_size:
+                        self.log("err", "镜像 %s 大于分区 %s（%s > %s），没有写入任何分区"
+                                 % (os.path.basename(image), target,
+                                    human_size(size), human_size(block_size)))
+                        return rc, "fail"
+                    self.log("info", "目标 %d/%d 可用：%s（分区 %s）"
+                             % (pair_no, total, target, human_size(block_size)))
+                else:
+                    self.log("warn", "目标 %d/%d 拿不到分区大小（设备上没有 blockdev？），"
+                             "跳过大小检查" % (pair_no, total))
 
-        # ---- 写入 ----
-        self._set_stage("dd")
-        dd_cmd = "dd if=%s of=%s bs=%d" % (remote, target, DD_BS)
-        rc, outcome, text = self._exec(
-            cfg, serial, ["shell", dd_cmd], cfg["timeout"], "写入分区")
-        if outcome == "stopped":
-            self.log("warn", "dd 被中断：分区可能只写了一部分，没有重启")
-            return rc, "stopped"
-        if outcome != "ok":
-            self.log("err", "dd 失败（退出码 %s），不会重启" % rc)
-            return rc, "fail"
-        low = (text or "").lower()
-        for bad in _DD_BAD:
-            if bad in low:
-                self.log("err", "dd 输出里出现「%s」，按失败处理，不会重启" % bad)
+                if self.stop_event.is_set():
+                    self.log("warn", "已停止，还没有写入任何分区")
+                    return None, "stopped"
+
+        # ---- 逐个镜像推送，再逐个分区写入 ----
+        written = 0
+        multi = len(plans) > 1
+        for n, (image, size, targets) in enumerate(plans, 1):
+            remote = push_dir.rstrip("/") + "/" + remote_name(
+                image, preset["id"], n if multi else 0)
+            self._set_stage("push")
+            self.log("info", "推送 %d/%d：%s" % (n, len(plans), os.path.basename(image)))
+            rc, outcome, _ = self._exec(
+                cfg, serial, ["push", image, remote], cfg["timeout"], "推送镜像")
+            if outcome == "stopped":
+                self.log("warn", "已停止：已写入 %d/%d 个分区，没有重启" % (written, total))
+                return rc, "stopped"
+            if outcome != "ok":
+                self.log("err", "推送失败，%s" % self._after_failure(written, total))
                 return rc, "fail"
+
+            # ---- 闸三：设备上的文件大小必须和本地一致 ----
+            rc, text = self._run_short(cfg, serial, "wc -c %s" % remote, CHECK_TIMEOUT)
+            match = re.search(r"(\d+)", text or "")
+            if match:
+                remote_size = int(match.group(1))
+                if remote_size != size:
+                    self.log("err", "推送后大小不一致（本地 %d 字节 / 设备 %d 字节），%s"
+                             % (size, remote_size, self._after_failure(written, total)))
+                    return rc, "fail"
+                self.log("ok", "已推送 %s，大小校验一致" % remote)
+            else:
+                low = (text or "").lower()
+                for bad in ("no such file", "not found", "permission denied"):
+                    if bad in low:
+                        self.log("err", "设备上读不到推送的文件，%s: %s"
+                                 % (self._after_failure(written, total),
+                                    (text or "").strip()[:120]))
+                        return rc, "fail"
+                self.log("warn", "读不到设备上文件的大小，跳过校验: %s"
+                         % (text or "").strip()[:120])
+
+            for target in targets:
+                if self.stop_event.is_set():
+                    self.log("warn", "已停止：已写入 %d/%d 个分区，没有重启"
+                             % (written, total))
+                    return None, "stopped"
+                self._set_stage("dd")
+                self.log("info", "写入 %d/%d：%s → %s"
+                         % (written + 1, total, os.path.basename(image), target))
+                dd_cmd = "dd if=%s of=%s bs=%d" % (remote, target, DD_BS)
+                rc, outcome, text = self._exec(
+                    cfg, serial, ["shell", dd_cmd], cfg["timeout"], "写入分区")
+                if outcome == "stopped":
+                    self.log("warn", "dd 被中断：%s 可能只写了一部分；已写入 %d/%d 个分区，"
+                             "没有重启" % (target, written, total))
+                    return rc, "stopped"
+                if outcome != "ok":
+                    self.log("err", "dd 失败（退出码 %s），%s"
+                             % (rc, self._after_failure(written, total)))
+                    return rc, "fail"
+                low = (text or "").lower()
+                hit = next((bad for bad in _DD_BAD if bad in low), None)
+                if hit:
+                    self.log("err", "dd 输出里出现「%s」，按失败处理，%s"
+                             % (hit, self._after_failure(written, total)))
+                    return rc, "fail"
+                written += 1
+                self.log("ok", "已写入 %d/%d：%s" % (written, total, target))
 
         # 这里停下来的话分区已经写完，但用户明确点了停止，就别替他重启
         if self.stop_event.is_set():
-            self.log("warn", "已停止：分区已经写完，没有执行 sync 和重启")
-            return rc, "stopped"
+            self.log("warn", "已停止：%d 个分区已经写完，没有执行 sync 和重启" % written)
+            return None, "stopped"
 
         # ---- 落盘 ----
         self._set_stage("sync")
@@ -672,7 +826,7 @@ class ReplaceImageTool(Tool):
             self.log("warn", "sync 没有正常结束，继续重启（内核重启前还会再同步一次）")
 
         if self.stop_event.is_set():
-            self.log("warn", "已停止：分区已经写完，没有重启")
+            self.log("warn", "已停止：%d 个分区已经写完，没有重启" % written)
             return rc, "stopped"
 
         # ---- 重启 ----
@@ -691,8 +845,15 @@ class ReplaceImageTool(Tool):
         else:
             self.log("ok", "写入完成（预设里没勾选重启）")
 
-        self.log("ok", "烧写完成：%s → %s" % (os.path.basename(image), target))
+        self.log("ok", "烧写完成：%d 个镜像 → %d 个分区" % (len(plans), total))
         return rc, "ok"
+
+    @staticmethod
+    def _after_failure(written, total):
+        """失败时把「已经写进去几个」说清楚，别让人以为分区一定完好。"""
+        if not written:
+            return "分区没有改动，不会重启"
+        return "已写入的 %d/%d 个分区不会回滚，不会重启" % (written, total)
 
     def _set_stage(self, stage):
         with self.lock:

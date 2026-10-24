@@ -23,6 +23,9 @@
         <span class="uptime" id="meta-uptime">—</span>
       </div>
 
+      <!-- 功能简述：内容由 shell.js 从 /api/tools 的 desc 填进来 -->
+      <p class="nameplate-desc" id="tool-desc"></p>
+
       <div class="readout" role="group" aria-label="执行统计">
         <span class="ro"><span class="ro-k">选中脚本</span><span class="ro-v" id="meta-script">—</span></span>
         <span class="ro"><span class="ro-k">设备</span><span class="ro-v" id="meta-target">—</span></span>
@@ -42,7 +45,7 @@
 
     <div class="workspace">
 
-      <section class="pane pane-params">
+      <section class="pane pane-params pane-scripts">
 
         <div class="pane-head">
           <h2 class="pane-title">参数</h2>
@@ -85,10 +88,12 @@
           <button id="btn-import" class="btn ghost small" type="button">导入脚本…</button>
         </div>
         <input id="file-input" type="file" hidden>
-        <ul id="script-list" class="scripts" aria-label="已导入的脚本">
-          <li class="dev-empty">还没有脚本，点「导入脚本…」选一个</li>
-        </ul>
-        <p class="hint">也可以把文件直接拖到这里。导入时会统一换行符（CRLF → LF）。</p>
+        <div id="script-drop" class="script-drop">
+          <ul id="script-list" class="scripts" aria-label="已导入的脚本">
+            <li class="dev-empty">还没有脚本，点「导入脚本…」选一个</li>
+          </ul>
+          <p class="hint">也可以把文件拖到脚本库下方的任意位置。导入时会统一换行符（CRLF → LF）。</p>
+        </div>
 
       </section>
 

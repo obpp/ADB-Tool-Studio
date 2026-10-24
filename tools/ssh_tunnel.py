@@ -143,6 +143,9 @@ class SshTunnelTool(Tool):
             "gatewayPorts": False,
             "autoReconnect": True,
             "reconnectInterval": 3.0,
+            # 页面里的「服务端环境变量」弹窗勾过「不再提示」没有。
+            # 它只影响进页面时自不自动弹；改了参数后页面会再提醒一次。
+            "envHintDismissed": False,
         }
 
     def sanitize_config(self, raw, base=None):
@@ -163,6 +166,8 @@ class SshTunnelTool(Tool):
             "gatewayPorts": as_bool(raw, "gatewayPorts", base["gatewayPorts"]),
             "autoReconnect": as_bool(raw, "autoReconnect", base["autoReconnect"]),
             "reconnectInterval": as_num(raw, "reconnectInterval", base["reconnectInterval"], 0.5, 3600.0),
+            "envHintDismissed": as_bool(raw, "envHintDismissed",
+                                         base.get("envHintDismissed", False)),
         }
 
     def default_stats(self):
@@ -353,7 +358,7 @@ class SshTunnelTool(Tool):
                  % port)
         self.log("warn", "把「远程绑定端口」改成别的端口（比如 %d），保存后重新点启动。"
                  % suggest)
-        self.log("warn", "换好后服务端 adb 要连新端口：%s" % env_command(suggest))
+        self.log("warn", "换好后在服务端 ~/.bashrc 里加：%s" % env_command(suggest))
         if self.config.get("gatewayPorts"):
             self.log("warn", "如果勾了「绑定到 0.0.0.0」，也可能服务端 sshd 没开 GatewayPorts —— 先取消勾选再试。")
 
