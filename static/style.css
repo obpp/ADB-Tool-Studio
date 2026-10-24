@@ -577,6 +577,39 @@ input:focus-visible, select:focus-visible {
 /* 字段下方的说明文字，出错时变红 */
 .hint[data-tone="error"] { color: var(--crit-ink); }
 
+/* ---------------------------------------------------------------- 镜像行 */
+
+/* 一个预设可以有多个镜像；每个镜像一行，目标可以在同一行写多个 */
+.image-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.image-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius);
+  background: var(--sunk);
+}
+.image-row-line { display: flex; align-items: center; gap: 6px; }
+.image-row-line input { flex: 1; min-width: 0; }
+.image-row-line .btn { flex: none; }
+.image-row .hint { margin: 0; }
+
+.image-rows-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.image-rows-actions .hint { flex: 1; min-width: 200px; margin: 2px 0 0; }
+
 /* ---------------------------------------------------------------- 确认条 */
 
 /* 写分区不可撤回：点「执行」只上膛，这里才是扣扳机的地方。
@@ -597,6 +630,15 @@ input:focus-visible, select:focus-visible {
   line-height: 1.6;
 }
 .confirm-text code { background: transparent; padding: 0; color: var(--ink); }
+
+/* 确认条里的「镜像 → 分区」清单 */
+.confirm-list {
+  margin: 6px 0;
+  padding-left: 18px;
+  font-size: 12px;
+  color: var(--ink-2);
+  line-height: 1.6;
+}
 .confirm-note {
   margin: 0 0 10px;
   font-size: 11.5px;

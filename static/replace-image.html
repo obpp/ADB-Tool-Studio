@@ -41,7 +41,7 @@
 
       <!-- 写分区不可撤回，点执行只是「上膛」，这里才是真正开始 -->
       <div class="confirm" id="confirm" hidden>
-        <p class="confirm-text" id="confirm-text"></p>
+        <div class="confirm-text" id="confirm-text"></div>
         <p class="confirm-note">写入分区不可撤回。确认镜像和目标设备都没选错。</p>
         <div class="confirm-actions">
           <button id="btn-confirm-run" class="btn primary" type="button">确认烧写</button>
@@ -105,23 +105,19 @@
           </label>
 
           <div class="field span-2">
-            <label class="field-label" for="preset-image">镜像文件</label>
-            <span class="field-inline">
-              <input id="preset-image" type="text" autocomplete="off" spellcheck="false"
-                     placeholder="~/rk3576_r8/kernel-6.1/boot.img">
-              <button id="btn-browse" class="btn ghost small" type="button">浏览…</button>
-            </span>
-            <span class="hint" id="image-info" role="status"></span>
+            <span class="field-label">镜像与写入目标</span>
+            <ul id="image-rows" class="image-rows" aria-label="镜像与写入目标列表"></ul>
+            <div class="image-rows-actions">
+              <button id="btn-add-image" class="btn ghost small" type="button">添加镜像</button>
+              <span class="hint">每行一个镜像；目标可以写完整路径，也可以只写分区名
+                （如 boot_a、boot_b），会自动补成 /dev/block/by-name/。
+                同一行写多个目标时用空格或逗号分隔。</span>
+            </div>
           </div>
 
           <label class="field span-2">
             <span class="field-label">推送目录（设备上）</span>
             <input id="preset-pushdir" type="text" autocomplete="off" spellcheck="false">
-          </label>
-
-          <label class="field span-2">
-            <span class="field-label">写入目标（设备上的块设备）</span>
-            <input id="preset-target" type="text" autocomplete="off" spellcheck="false">
           </label>
 
           <label class="check span-2">

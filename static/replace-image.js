@@ -58,9 +58,20 @@
 
     var current = findPreset(selectedId);
     setText('#meta-preset', current ? current.name : '—');
-    setText('#meta-image', current ? baseName(current.imagePath) : '—');
-    $('#meta-image').title = current ? current.imagePath : '';
-    setText('#meta-target', current ? current.target : '—');
+    var currentItems = current ? presetItems(current) : [];
+    var imagePaths = currentItems.map(function (item) {
+      return item.imagePath;
+    }).filter(Boolean);
+    var allTargets = [];
+    currentItems.forEach(function (item) {
+      allTargets = allTargets.concat(item.targets);
+    });
+    setText('#meta-image', !imagePaths.length ? '—'
+      : (imagePaths.length === 1 ? baseName(imagePaths[0]) : imagePaths.length + ' 个镜像'));
+    $('#meta-image').title = imagePaths.join('\n');
+    setText('#meta-target', !allTargets.length ? '—'
+      : (allTargets.length === 1 ? allTargets[0] : allTargets.length + ' 个分区'));
+    $('#meta-target').title = allTargets.join('\n');
     $('#kpi-runs').textContent = ADB.num(stats.runs);
     $('#kpi-failures').textContent = ADB.num(stats.failures);
     $('#meta-exit').textContent = (stats.lastExitCode === null ||
@@ -78,13 +89,11 @@
         if (fill) {
           editingId = selectedId;
           fillPresetForm(fill);
-          refreshImageInfo(fill.imagePath);
         }
       } else if (!selectedId && editingId && !findPreset(editingId)) {
         // 正在编辑的预设已经不在了
         editingId = '';
         fillPresetForm(blankPreset());
-        setImageInfo('');
       }
     }
 
@@ -141,7 +150,7 @@
     if (!list) return;
 
     var key = presets.map(function (p) {
-      return [p.id, p.name, p.imagePath, p.target, p.pushDir, p.reboot,
+      return [p.id, p.name, JSON.stringify(p.items), p.pushDir, p.reboot,
         p.lastRunAt, p.lastExitCode].join('|');
     }).join('\n') + '#' + selectedId + '#' + runningId;
     if (key === renderKey) return;
@@ -181,7 +190,16 @@
 
     var meta = document.createElement('span');
     meta.className = 'script-meta';
-    var bits = [baseName(item.imagePath) || '未选镜像', '→', item.target || '未设目标'];
+    var items = presetItems(item);
+    var imageCount = items.filter(function (row) {
+      return row.imagePath;
+    }).length;
+    var targetCount = countTargets(item);
+    var bits = [
+      imageCount > 1 ? imageCount + ' 个镜像' : (baseName(items[0].imagePath) || '未选镜像'),
+      '→',
+      targetCount > 1 ? targetCount + ' 个分区' : (items[0].targets[0] || '未设目标')
+    ];
     if (item.lastRunAt) {
       bits.push('上次 ' + dateText(item.lastRunAt) +
         (item.lastExitCode === null ? ' 异常' : ' 退出码 ' + item.lastExitCode));
@@ -191,7 +209,11 @@
     li.appendChild(name);
     li.appendChild(meta);
 
-    li.title = item.name + '\n' + item.imagePath + '\n写入 ' + item.target +
+    var detail = items.map(function (row) {
+      return '  ' + (baseName(row.imagePath) || '未选镜像') + ' → ' +
+        (row.targets.join(', ') || '未设目标');
+    }).join('\n');
+    li.title = item.name + '\n' + detail +
       '\n推送目录 ' + item.pushDir + (item.reboot ? '\n完成后重启' : '\n不重启');
     li.addEventListener('click', function () { selectPreset(item.id); });
     li.addEventListener('keydown', function (ev) {
@@ -212,7 +234,6 @@
     formDirty = false;
     setStatus('#form-status', '');
     hideConfirm();
-    refreshImageInfo(preset.imagePath);
 
     if (id !== selectedId) {
       selectedId = id;
@@ -227,30 +248,182 @@
 
   function fillPresetForm(preset) {
     $('#preset-name').value = preset.name || '';
-    $('#preset-image').value = preset.imagePath || '';
     $('#preset-pushdir').value = preset.pushDir || '/mnt';
-    $('#preset-target').value = preset.target || '';
     $('#preset-reboot').checked = preset.reboot !== false;
+    renderImageRows(presetItems(preset));
     $('#btn-delete').disabled = !editingId;
   }
 
   function blankPreset() {
     return {
-      name: '', imagePath: '', pushDir: '/mnt',
-      target: '/dev/block/by-name/boot', reboot: true
+      name: '', pushDir: '/mnt',
+      items: [{ imagePath: '', targets: [] }],
+      reboot: true
     };
   }
 
   function collectPreset() {
+    var rows = $('#image-rows').querySelectorAll('.image-row');
+    var items = [];
+    for (var i = 0; i < rows.length; i++) {
+      items.push({
+        imagePath: rows[i].querySelector('.image-path').value.trim(),
+        targets: splitTargets(rows[i].querySelector('.image-targets').value)
+      });
+    }
     return {
       id: editingId,
       name: $('#preset-name').value.trim(),
-      imagePath: $('#preset-image').value.trim(),
       pushDir: $('#preset-pushdir').value.trim(),
-      target: $('#preset-target').value.trim(),
+      items: items,
       reboot: $('#preset-reboot').checked
     };
   }
+
+  function splitTargets(text) {
+    return String(text || '').split(/[\s,，;；]+/).filter(function (s) {
+      return !!s;
+    });
+  }
+
+  /* 老预设是单个 imagePath/target；后端已经统一成 items，这里再兜一层 */
+  function presetItems(preset) {
+    if (preset && preset.items && preset.items.length) {
+      return preset.items.map(function (item) {
+        return {
+          imagePath: item.imagePath || '',
+          targets: (item.targets || []).slice()
+        };
+      });
+    }
+    if (preset && (preset.imagePath || preset.target)) {
+      return [{
+        imagePath: preset.imagePath || '',
+        targets: preset.target ? [preset.target] : []
+      }];
+    }
+    return [{ imagePath: '', targets: [] }];
+  }
+
+  function countTargets(preset) {
+    return presetItems(preset).reduce(function (n, item) {
+      return n + item.targets.length;
+    }, 0);
+  }
+
+  /* ---------------- 镜像与目标行 ---------------- */
+
+  function renderImageRows(items) {
+    var list = $('#image-rows');
+    if (!list) return;
+    list.textContent = '';
+    (items && items.length ? items : [{ imagePath: '', targets: [] }])
+      .forEach(function (item) {
+        list.appendChild(buildImageRow(item));
+      });
+    syncRowButtons();
+    var rows = list.querySelectorAll('.image-row');
+    for (var i = 0; i < rows.length; i++) refreshRowInfo(rows[i]);
+  }
+
+  function buildImageRow(item) {
+    var li = document.createElement('li');
+    li.className = 'image-row';
+
+    var line1 = document.createElement('div');
+    line1.className = 'image-row-line';
+
+    var image = document.createElement('input');
+    image.type = 'text';
+    image.className = 'image-path';
+    image.autocomplete = 'off';
+    image.spellcheck = false;
+    image.placeholder = '镜像路径，比如 ~/rk3576/kernel-6.1/boot.img';
+    image.setAttribute('aria-label', '镜像文件');
+    image.value = item.imagePath || '';
+
+    var browse = document.createElement('button');
+    browse.type = 'button';
+    browse.className = 'btn ghost small';
+    browse.textContent = '浏览…';
+    browse.addEventListener('click', function () { browseImage(image); });
+
+    line1.appendChild(image);
+    line1.appendChild(browse);
+
+    var line2 = document.createElement('div');
+    line2.className = 'image-row-line';
+
+    var targets = document.createElement('input');
+    targets.type = 'text';
+    targets.className = 'image-targets';
+    targets.autocomplete = 'off';
+    targets.spellcheck = false;
+    targets.placeholder = '写到哪里，比如 boot_a boot_b';
+    targets.setAttribute('aria-label', '写入目标（可多个）');
+    targets.value = (item.targets || []).join(' ');
+
+    var remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'btn ghost small image-row-remove';
+    remove.textContent = '移除';
+    remove.addEventListener('click', function () {
+      if ($('#image-rows').childElementCount <= 1) return;
+      li.parentNode.removeChild(li);
+      syncRowButtons();
+      markPresetDirty();
+    });
+
+    line2.appendChild(targets);
+    line2.appendChild(remove);
+
+    var info = document.createElement('span');
+    info.className = 'hint image-info';
+    info.setAttribute('role', 'status');
+
+    li.appendChild(line1);
+    li.appendChild(line2);
+    li.appendChild(info);
+
+    // 只在离开输入框时查一次，别每敲一个字就发一个请求
+    image.addEventListener('change', function () {
+      autoName(image.value);
+      refreshRowInfo(li);
+    });
+
+    return li;
+  }
+
+  function syncRowButtons() {
+    var rows = $('#image-rows').querySelectorAll('.image-row');
+    for (var i = 0; i < rows.length; i++) {
+      var btn = rows[i].querySelector('.image-row-remove');
+      if (btn) btn.disabled = rows.length <= 1;
+    }
+  }
+
+  function focusRow(index, selector) {
+    var rows = $('#image-rows').querySelectorAll('.image-row');
+    var row = rows[index];
+    if (!row) return;
+    var el = row.querySelector(selector);
+    if (el) el.focus();
+  }
+
+  function markPresetDirty() {
+    formDirty = true;
+    setStatus('#form-status', '有未保存的修改');
+    hideConfirm();
+  }
+
+  $('#btn-add-image').addEventListener('click', function () {
+    var list = $('#image-rows');
+    list.appendChild(buildImageRow({ imagePath: '', targets: [] }));
+    syncRowButtons();
+    markPresetDirty();
+    var row = list.lastElementChild;
+    if (row) row.querySelector('.image-path').focus();
+  });
 
   var presetForm = $('#preset-form');
 
@@ -272,13 +445,25 @@
 
   function savePreset() {
     var payload = collectPreset();
-    if (!payload.imagePath) {
-      setStatus('#form-status', '先选一个镜像文件', true);
-      return;
+    var filled = 0;
+    for (var i = 0; i < payload.items.length; i++) {
+      var item = payload.items[i];
+      if (!item.imagePath && !item.targets.length) continue;   // 空行，跳过
+      filled++;
+      if (!item.imagePath) {
+        setStatus('#form-status', '第 ' + (i + 1) + ' 行还没选镜像', true);
+        focusRow(i, '.image-path');
+        return;
+      }
+      if (!item.targets.length) {
+        setStatus('#form-status', '第 ' + (i + 1) + ' 行没有写写入目标', true);
+        focusRow(i, '.image-targets');
+        return;
+      }
     }
-    if (!payload.target) {
-      setStatus('#form-status', '填一个写入目标', true);
-      $('#preset-target').focus();
+    if (!filled) {
+      setStatus('#form-status', '先选一个镜像文件', true);
+      focusRow(0, '.image-path');
       return;
     }
 
@@ -300,7 +485,6 @@
       renderKey = '';
       renderPresets();
       syncButtons();
-      refreshImageInfo(data.preset.imagePath);
       setStatus('#form-status',
         data.saved ? '已保存' : '已生效，但写入配置文件失败', !data.saved);
     }).catch(function () {
@@ -319,7 +503,6 @@
     syncButtons();
     hideConfirm();
     setStatus('#form-status', '');
-    setImageInfo('');
     client.post('config', { selected: '' });
     $('#preset-name').focus();
   });
@@ -360,7 +543,6 @@
       renderKey = '';
       renderPresets();
       syncButtons();
-      refreshImageInfo(rest.length ? rest[0].imagePath : '');
       setStatus('#form-status', '已删除');
     }).catch(function () {
       btn.disabled = false;
@@ -370,35 +552,35 @@
 
   /* ---------------- 镜像信息 ---------------- */
 
-  function refreshImageInfo(path) {
-    path = (path || '').trim();
-    if (!path) { setImageInfo(''); return; }
+  function refreshRowInfo(row) {
+    if (!row) return;
+    var path = row.querySelector('.image-path').value.trim();
+    setRowInfo(row, '');
+    if (!path) return;
     ADB.postJSON('/api/replace_image/fs/stat', { path: path }).then(function (data) {
-      if (!data || !data.ok) { setImageInfo(''); return; }
-      if (!data.exists) setImageInfo('文件不存在，执行前请确认路径', true);
-      else if (!data.isFile) setImageInfo('这是个目录，不是镜像文件', true);
-      else setImageInfo(sizeText(data.size));
-    }).catch(function () { setImageInfo(''); });
+      if (!data || !data.ok) { setRowInfo(row, ''); return; }
+      if (!data.exists) setRowInfo(row, '文件不存在，执行前请确认路径', true);
+      else if (!data.isFile) setRowInfo(row, '这是个目录，不是镜像文件', true);
+      else setRowInfo(row, sizeText(data.size));
+    }).catch(function () { setRowInfo(row, ''); });
   }
 
-  function setImageInfo(text, isError) {
-    var el = $('#image-info');
+  function setRowInfo(row, text, isError) {
+    var el = row.querySelector('.image-info');
     if (!el) return;
     if (isError) el.setAttribute('data-tone', 'error');
     else el.removeAttribute('data-tone');
     el.textContent = text || '';
   }
 
-  $('#preset-image').addEventListener('change', function () {
-    refreshImageInfo(this.value);
-  });
-
   /* ---------------- 镜像浏览器 ---------------- */
 
   var picker = { path: '', parent: '', showAll: false };
+  var pickerInput = null;      // 选完把路径填回哪一行的输入框
 
   function openPicker() {
-    var start = $('#preset-image').value.trim();
+    var start = '';
+    if (pickerInput) start = pickerInput.value.trim();
     if (start) start = dirName(start);
     if (!start) start = lastBrowseDir;
     $('#picker').hidden = false;
@@ -409,7 +591,7 @@
 
   function closePicker() {
     $('#picker').hidden = true;
-    $('#btn-browse').focus();
+    if (pickerInput) pickerInput.focus();
   }
 
   function loadDir(path) {
@@ -483,20 +665,19 @@
 
     btn.addEventListener('click', function () {
       if (kind === 'dir') loadDir(path);
-      else chooseImage(path);
+      else chooseImage(path, pickerInput);
     });
 
     li.appendChild(btn);
     return li;
   }
 
-  function chooseImage(path) {
-    $('#preset-image').value = path;
+  function chooseImage(path, input) {
+    if (!input) return;
+    input.value = path;
     autoName(path);
-    formDirty = true;
-    setStatus('#form-status', '有未保存的修改');
-    hideConfirm();
-    refreshImageInfo(path);
+    markPresetDirty();
+    refreshRowInfo(input.closest('.image-row'));
     lastBrowseDir = dirName(path);
     closePicker();
     client.post('config', { lastBrowseDir: lastBrowseDir });
@@ -518,15 +699,16 @@
     return api && typeof api.pick_image === 'function' ? api : null;
   }
 
-  $('#btn-browse').addEventListener('click', function () {
+  function browseImage(input) {
+    pickerInput = input;
     var api = nativePicker();
     if (!api) { openPicker(); return; }
-    var current = $('#preset-image').value.trim();
+    var current = input.value.trim();
     var startDir = current ? dirName(current) : (lastBrowseDir || '');
     api.pick_image(startDir).then(function (path) {
-      if (path) chooseImage(path);
+      if (path) chooseImage(path, input);
     }).catch(function () { openPicker(); });
-  });
+  }
   $('#picker-close').addEventListener('click', closePicker);
   $('#picker').addEventListener('click', function (ev) {
     if (ev.target === $('#picker')) closePicker();
@@ -654,15 +836,29 @@
   function showConfirm(preset, serial) {
     var text = $('#confirm-text');
     text.textContent = '';
+    var items = presetItems(preset);
+    var total = countTargets(preset);
 
-    text.appendChild(document.createTextNode('即将把 '));
-    text.appendChild(code(baseName(preset.imagePath)));
-    text.appendChild(document.createTextNode(' 推送到 '));
-    text.appendChild(code(serial + ':' + preset.pushDir));
-    text.appendChild(document.createTextNode('，然后写入 '));
-    text.appendChild(code(preset.target));
     text.appendChild(document.createTextNode(
-      preset.reboot ? '，写入成功后重启设备。' : '，写完不重启。'));
+      '即将把 ' + items.length + ' 个镜像（' + total + ' 个分区）推送到 '));
+    text.appendChild(code(serial + ':' + preset.pushDir));
+    text.appendChild(document.createTextNode('：'));
+
+    var list = document.createElement('ul');
+    list.className = 'confirm-list';
+    items.forEach(function (item) {
+      item.targets.forEach(function (target) {
+        var li = document.createElement('li');
+        li.appendChild(code(baseName(item.imagePath) || '未选镜像'));
+        li.appendChild(document.createTextNode(' → '));
+        li.appendChild(code(target));
+        list.appendChild(li);
+      });
+    });
+    text.appendChild(list);
+
+    text.appendChild(document.createTextNode(
+      preset.reboot ? '全部写入成功后重启设备。' : '写完不重启。'));
 
     confirming = true;
     $('#confirm').hidden = false;
@@ -692,6 +888,10 @@
     var preset = findPreset(selectedId);
     if (!preset) {
       setStatus('#preset-status', '这个预设已经不在了，刷新一下', true);
+      return;
+    }
+    if (!countTargets(preset)) {
+      setStatus('#preset-status', '这个预设没有写入目标', true);
       return;
     }
     var serial = resolveSerial();
@@ -779,6 +979,8 @@
 
   /* ---------------- 启动 ---------------- */
 
+  // 还没有预设时也得给一行可填的，不然表单是空的
+  renderImageRows([{ imagePath: '', targets: [] }]);
   refreshDevices();
   setInterval(function () {
     if (!state || state.status === 'idle') refreshDevices();
