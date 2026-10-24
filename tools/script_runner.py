@@ -88,7 +88,7 @@ class ScriptRunnerTool(Tool):
 
     id = "script_runner"
     name = "脚本执行"
-    desc = "把脚本推到设备上执行，输出实时显示"
+    desc = "可以拖拽导入脚本，带参执行，会把脚本推到设备上执行，输出实时显示"
     page = "scripts"
     icon = "▷"
 

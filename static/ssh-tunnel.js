@@ -12,6 +12,9 @@
   var cfgDirty = false;
   var lastCommand = '';
   var previewTimer = null;
+  var envPrompted = false;     // 这次打开页面已经弹过环境变量提醒
+  var envLastConfig = null;    // 上次看到的配置，用来判断用户是否改过参数
+  var envPort = 0;
 
   client.onState(renderState);
   client.onLog(function (entry) { log.append(entry); });
@@ -76,7 +79,74 @@
     $('#btn-stop').disabled = !running;
 
     updatePortHint(extra);
+    maybePromptEnv(s);
   }
+
+  /* 服务端环境变量提醒：进页面时弹一次；勾了「不再提示」后不再自动弹。
+     但参数被改过并保存后，命令可能已经变了，再提醒一次。 */
+  function maybePromptEnv(s) {
+    var cfg = s.config || {};
+    var key = configKey(cfg);
+    var changed = envLastConfig !== null && envLastConfig !== key;
+    if (changed) envPrompted = false;
+    envLastConfig = key;
+
+    if (envPrompted) return;
+    // 「不再提示」只管进页面时的自动弹窗；参数改过之后还要再提醒一次
+    if (cfg.envHintDismissed && !changed) return;
+    envPrompted = true;
+    showEnvModal(Number(cfg.remotePort) || 5037);
+  }
+
+  // 「不再提示」这个开关本身不算参数变化，否则关一次就再也判断不出改动
+  function configKey(cfg) {
+    var copy = {};
+    Object.keys(cfg).sort().forEach(function (k) {
+      if (k !== 'envHintDismissed') copy[k] = cfg[k];
+    });
+    return JSON.stringify(copy);
+  }
+
+  function envCommandFor(port) {
+    return 'export ANDROID_ADB_SERVER_PORT=' + port;
+  }
+
+  function showEnvModal(port) {
+    envPort = port;
+    $('#env-command').textContent = envCommandFor(port);
+    $('#env-note').textContent =
+      '服务器的远端绑定端口如果被占用，需要更换端口，并在服务器端 ~/.bashrc 中' +
+      '添加下面这行（xxx 就是当前远程绑定端口）：';
+    $('#env-hint').textContent = '当前远程绑定端口：' + port +
+      '。换端口保存后这里会跟着更新；添加后执行 source ~/.bashrc 或重新登录。';
+    $('#env-mute').checked = false;
+    $('#env-modal').hidden = false;
+    $('#env-ok').focus();
+  }
+
+  function closeEnvModal(dismiss) {
+    var modal = $('#env-modal');
+    if (!modal || modal.hidden) return;
+    modal.hidden = true;
+    if (dismiss) client.saveConfig({ envHintDismissed: true });
+  }
+
+  $('#env-ok').addEventListener('click', function () {
+    closeEnvModal($('#env-mute').checked);
+  });
+  $('#env-close').addEventListener('click', function () { closeEnvModal(false); });
+  $('#env-copy').addEventListener('click', function () {
+    ADB.copyText(envCommandFor(envPort), $('#env-copy-status'), '已复制');
+  });
+  $('#env-modal').addEventListener('click', function (ev) {
+    if (ev.target === $('#env-modal')) closeEnvModal(false);
+  });
+  document.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Escape' && !$('#env-modal').hidden) {
+      ev.preventDefault();
+      closeEnvModal(false);
+    }
+  });
 
   /* 远程端口不是 5037 时，服务端 adb 必须设 ANDROID_ADB_SERVER_PORT；
      端口绑定失败时，优先提示换一个端口。 */
@@ -92,7 +162,7 @@
       var suggest = port < 65535 ? port + 1 : port - 1;
       el.setAttribute('data-tone', 'error');
       el.textContent = '端口 ' + port + ' 绑定失败（多半被占用）。改一个再启动，比如 ' +
-        suggest + '；服务端要同步 export ANDROID_ADB_SERVER_PORT=' + suggest;
+        suggest + '；服务端在 ~/.bashrc 里加 export ANDROID_ADB_SERVER_PORT=' + suggest;
       return;
     }
 
@@ -102,7 +172,8 @@
       el.textContent = '';
       return;
     }
-    el.textContent = '服务端 adb 要连这个端口：export ANDROID_ADB_SERVER_PORT=' + port;
+    el.textContent = '服务端 adb 要连这个端口：export ANDROID_ADB_SERVER_PORT=' + port +
+      '（建议写进 ~/.bashrc）';
   }
 
   setInterval(function () {
@@ -201,6 +272,8 @@
     client.saveConfig(collectConfig()).then(function (data) {
       if (data.ok) {
         applyConfig(data.config, true);
+        // SSE 还没到也没关系，改过的参数立刻就能触发一次提醒
+        maybePromptEnv({ config: data.config });
         cfgStatus.textContent = data.saved ? '已保存' : '已生效，但写入配置文件失败';
         if (!data.saved) cfgStatus.setAttribute('data-tone', 'error');
         setTimeout(function () { cfgStatus.textContent = ''; }, 3000);
@@ -218,7 +291,8 @@
 
   $('#btn-start').addEventListener('click', function () {
     // 先落盘再连，免得连的还是旧参数
-    client.saveConfig(collectConfig()).then(function () {
+    client.saveConfig(collectConfig()).then(function (data) {
+      if (data && data.config) maybePromptEnv({ config: data.config });
       return client.start();
     });
   });

@@ -143,6 +143,18 @@ window.SHELL = (function () {
 
   function paint(tools) {
     running = {};
+
+    // 当前功能页标题下面的一句话说明，内容来自后端的 Tool.desc
+    var descEl = $('#tool-desc');
+    if (descEl) {
+      var active = null;
+      for (var i = 0; i < tools.length; i++) {
+        if (tools[i].id === activeId) { active = tools[i]; break; }
+      }
+      var text = active && active.desc ? active.desc : '';
+      if (descEl.textContent !== text) descEl.textContent = text;
+    }
+
     tools.forEach(function (tool) {
       var it = items[tool.id];
       if (!it) return;

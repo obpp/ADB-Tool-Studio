@@ -23,6 +23,9 @@
         <span class="uptime" id="meta-uptime">—</span>
       </div>
 
+      <!-- 功能简述：内容由 shell.js 从 /api/tools 的 desc 填进来 -->
+      <p class="nameplate-desc" id="tool-desc"></p>
+
       <div class="readout" role="group" aria-label="隧道统计">
         <span class="ro"><span class="ro-k">隧道</span><span class="ro-v" id="meta-tunnel">—</span></span>
         <span class="ro"><span class="ro-k">连接次数</span><span class="ro-v" id="kpi-connects">0</span></span>
@@ -141,6 +144,33 @@
 
     </div>
   </main>
+</div>
+
+<!-- 服务端环境变量提醒：远程端口不是默认值时，远程 adb 客户端要跟着改 -->
+<div class="picker" id="env-modal" hidden role="dialog" aria-modal="true"
+     aria-labelledby="env-title">
+  <div class="picker-panel env-panel">
+    <div class="pane-head">
+      <h2 class="pane-title" id="env-title">服务端 adb 端口设置</h2>
+      <button id="env-close" class="btn ghost small" type="button">关闭</button>
+    </div>
+
+    <p id="env-note" class="hint"></p>
+
+    <div class="env-command">
+      <code id="env-command"></code>
+      <button id="env-copy" class="btn ghost small" type="button">复制</button>
+      <span id="env-copy-status" class="form-status" role="status"></span>
+    </div>
+
+    <p id="env-hint" class="hint"></p>
+
+    <label class="check"><input id="env-mute" type="checkbox"> 不再提示</label>
+
+    <div class="form-actions">
+      <button id="env-ok" class="btn primary" type="button">知道了</button>
+    </div>
+  </div>
 </div>
 
 <script src="/static/common.js"></script>
