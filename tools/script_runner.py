@@ -4,7 +4,10 @@
 流程等价于：
 
     adb -s <序列号> push check.sh /data/local/tmp/ats-7f2a-check.sh
-    adb -s <序列号> shell sh /data/local/tmp/ats-7f2a-check.sh
+    adb -s <序列号> shell sh /data/local/tmp/ats-7f2a-check.sh [参数...]
+
+参数是这个脚本自己的（页面上「脚本参数」一栏，跟着脚本清单一起存），
+不是全局配置 —— 几个脚本各自要的开关、路径不一样。
 
 每次执行都重新推一份，不做「设备上已有就跳过」的判断 —— 列表里显示的是哪份，
 跑的就一定是哪份。
@@ -30,6 +33,12 @@ from toolbase import Tool, as_num, as_str, shell_join
 
 # 导入脚本的大小上限。脚本是文本，几 MB 已经离谱了。
 MAX_SCRIPT_BYTES = 2 * 1024 * 1024
+
+# 参数串上限。真要传很长的参数，写进脚本里比塞在输入框里靠谱。
+MAX_ARGS_CHARS = 1024
+
+# 这些字符在设备上的 sh 里没有特殊含义，可以原样传；其余一律加单引号
+_SAFE_ARG = re.compile(r"^[A-Za-z0-9_./:=@%+,^-]+$")
 
 # 文件名里不能出现的字符：Windows 的保留字符 + 控制字符
 _BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
@@ -73,6 +82,93 @@ def normalize_text(data):
     if "\x00" in text:                      # 含 NUL，多半是二进制
         return data
     return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+
+
+def clean_args(value):
+    """把页面上的参数串收拾成一行。返回 (文本, 错误说明)。
+
+    超长直接报错而不是截断 —— 截断会悄悄改掉要执行的命令，比不执行更糟。
+    """
+    if value is None:
+        text = ""
+    elif isinstance(value, str):
+        text = value
+    else:
+        text = str(value)
+    text = text.replace("\r", " ").replace("\n", " ").strip()
+    if len(text) > MAX_ARGS_CHARS:
+        return None, "参数太长（上限 %d 字符）" % MAX_ARGS_CHARS
+    return text, ""
+
+
+def split_args(text):
+    """把参数串拆成 argv。规则和 shell 差不多，但有一处故意不同：
+
+      * 空白分隔；'...' 原样保留；"..." 里可以用 \\" 和 \\\\ 转义
+      * 反斜杠在引号外不当转义符 —— Windows 路径（C:\\temp）不写引号也不会被吃掉
+      * 空引号 '' / "" 算一个空参数
+
+    引号没闭合时抛 ValueError：执行前就报错，别猜一个可能写错分区的参数出去。
+    """
+    args = []
+    buf = []
+    started = False
+    quote = None
+    i = 0
+    n = len(text)
+
+    while i < n:
+        ch = text[i]
+        if quote == "'":
+            if ch == "'":
+                quote = None
+            else:
+                buf.append(ch)
+        elif quote == '"':
+            if ch == "\\" and i + 1 < n and text[i + 1] in '"\\':
+                i += 1
+                buf.append(text[i])
+            elif ch == '"':
+                quote = None
+            else:
+                buf.append(ch)
+        elif ch in " \t\r\n":
+            if started:
+                args.append("".join(buf))
+                buf = []
+                started = False
+        elif ch in "'\"":
+            quote = ch
+            started = True
+        else:
+            buf.append(ch)
+            started = True
+        i += 1
+
+    if quote is not None:
+        raise ValueError("引号没闭合")
+    if started:
+        args.append("".join(buf))
+    return args
+
+
+def check_args(text):
+    """参数串现在能不能拆成 argv。返回错误说明，没问题返回空串。"""
+    try:
+        split_args(text)
+    except ValueError as exc:
+        return str(exc)
+    return ""
+
+
+def device_quote(token):
+    """给设备上的 sh 转义一个参数：安全字符原样，其余用单引号包起来。
+
+    单个引号写成 '\\''（闭合、转义、再打开），POSIX shell 都认这一套。
+    """
+    if token and _SAFE_ARG.match(token):
+        return token
+    return "'" + token.replace("'", "'\\''") + "'"
 
 
 def human_size(n):
@@ -184,6 +280,7 @@ class ScriptRunnerTool(Tool):
             "name": name,
             "file": fname,
             "size": int(raw.get("size") or 0),
+            "args": clean_args(raw.get("args"))[0] or "",
             "addedAt": raw.get("addedAt"),
             "lastRunAt": raw.get("lastRunAt"),
             "lastExitCode": raw.get("lastExitCode"),
@@ -229,6 +326,7 @@ class ScriptRunnerTool(Tool):
             "name": safe_filename(name),
             "file": fname,
             "size": len(payload),
+            "args": "",
             "addedAt": time.time(),
             "lastRunAt": None,
             "lastExitCode": None,
@@ -306,6 +404,8 @@ class ScriptRunnerTool(Tool):
             return self._api_rename(data)
         if action == "scripts/delete":
             return self._api_delete(data)
+        if action == "scripts/args":
+            return self._api_args(data)
         return None
 
     def _api_import(self, raw, query):
@@ -365,6 +465,43 @@ class ScriptRunnerTool(Tool):
         self.publish_state()
         return {"ok": True, "saved": saved, "script": result}, 200
 
+    def _api_args(self, data):
+        """参数是跟着脚本存的，切回这个脚本时输入框里还是上次那串。"""
+        data = data if isinstance(data, dict) else {}
+        sid = str(data.get("id") or "")
+        text, err = clean_args(data.get("args"))
+        if not sid:
+            return {"ok": False, "error": "缺少参数"}, 400
+        if not err:
+            err = check_args(text)
+        if err:
+            return {"ok": False, "error": err}, 400
+
+        with self.lock:
+            entry, saved = self._set_args(sid, text)
+            if entry is None:
+                return {"ok": False, "error": "没有这个脚本"}, 404
+            result = dict(entry)
+
+        # 故意不广播：这一改几乎总是紧跟着一次「切换脚本」的 config 请求，
+        # 广播出去的那份 state 里 selected 还是旧的，页面会被拽回去闪一下。
+        # 页面拿返回值同步本地就行，下一次自然的状态推送会带上新参数。
+        return {"ok": True, "saved": saved, "script": result}, 200
+
+    def _set_args(self, sid, text):
+        """把参数记到脚本名下。调用方持锁，返回 (条目, 有没有写盘成功)。"""
+        entry = self._find(sid)
+        if entry is None:
+            return None, True
+        if entry.get("args", "") != text:
+            entry["args"] = text
+            try:
+                self._save_scripts()
+            except (IOError, OSError) as exc:
+                self.log("warn", "脚本清单写入失败: %s" % exc)
+                return entry, False
+        return entry, True
+
     def _api_delete(self, data):
         data = data if isinstance(data, dict) else {}
         sid = str(data.get("id") or "")
@@ -418,6 +555,25 @@ class ScriptRunnerTool(Tool):
 
     # ---------------- 主流程 ----------------
 
+    def start(self, options=None):
+        """执行前先把参数记到这个脚本名下：页面上显示的是哪串，跑的就是哪串。
+
+        参数也走 start 而不是单独一次保存请求 —— 中间少一个来回，
+        就不会出现「参数存进去了但这次执行用的还是旧的」。
+        """
+        options = dict(options) if isinstance(options, dict) else {}
+        if "args" in options:
+            text, err = clean_args(options.get("args"))
+            if not err:
+                err = check_args(text)
+            if err:
+                return False, "参数写错了: %s" % err
+            options["args"] = text
+            sid = str(options.get("scriptId") or self.config.get("selected") or "")
+            with self.lock:
+                self._set_args(sid, text)
+        return Tool.start(self, options)
+
     def run_loop(self):
         cfg = dict(self.config)
         sid = str(self.start_options.get("scriptId") or cfg.get("selected") or "")
@@ -430,6 +586,7 @@ class ScriptRunnerTool(Tool):
             script_path = os.path.join(self.script_dir(), entry["file"])
             script_name = entry["name"]
             remote_name = self._remote_name(entry)
+            args_text = entry.get("args", "")
             self._running_id = entry["id"]
 
         started = time.time()
@@ -438,6 +595,13 @@ class ScriptRunnerTool(Tool):
         try:
             if not os.path.isfile(script_path):
                 self.log("err", "脚本文件不见了: %s" % script_path)
+                return
+
+            # 参数先拆好：写错了就别推到设备上白跑一趟
+            try:
+                argv = split_args(args_text)
+            except ValueError as exc:
+                self.log("err", "参数写错了: %s" % exc)
                 return
 
             devices, _ = self.refresh_devices()
@@ -464,7 +628,7 @@ class ScriptRunnerTool(Tool):
                 return
             self.log("ok", "已推送到 %s" % remote)
 
-            rc, outcome = self._shell(cfg, serial, remote)
+            rc, outcome = self._shell(cfg, serial, remote, argv)
 
         finally:
             elapsed = time.time() - started
@@ -488,10 +652,19 @@ class ScriptRunnerTool(Tool):
                 self._save_scripts_quiet()
             self.publish_state()
 
-    def _shell(self, cfg, serial, remote):
+    def _shell(self, cfg, serial, remote, argv=None):
         """在设备上跑脚本，边跑边把输出推进日志。返回 (返回码, 结果)。"""
-        cmd = adbkit.build_command(cfg["adbPath"], serial, ["shell", "sh", remote])
-        self.log("cmd", "$ " + shell_join(cmd))
+        argv = list(argv or [])
+
+        # adb shell 是把后面的参数用空格拼成一条命令交给设备上的 sh 的，
+        # 不经过本地 shell，所以带空格的参数到那边会被拆开。这里自己按 POSIX
+        # 规则把每个参数引号包好，整体作为一条命令传过去。
+        device_cmd = " ".join(device_quote(tok) for tok in ["sh", remote] + argv)
+        cmd = adbkit.build_command(cfg["adbPath"], serial, ["shell", device_cmd])
+
+        # 日志里按参数分开显示，和手敲的写法一致，方便直接抄走
+        self.log("cmd", "$ " + shell_join(
+            adbkit.build_command(cfg["adbPath"], serial, ["shell", "sh", remote] + argv)))
 
         try:
             proc = subprocess.Popen(

@@ -15,6 +15,7 @@
 
   var client = new ADB.ToolClient('script_runner');
   var log = new ADB.LogConsole($('#log'), $('#follow'));
+  var argsInput = $('#cfg-args');
 
   var state = null;
   var scripts = [];
@@ -54,6 +55,7 @@
 
     var current = findScript(selectedId);
     $('#meta-script').textContent = current ? current.name : '—';
+    syncArgsInput(current);
     $('#kpi-runs').textContent = ADB.num(stats.runs);
     $('#kpi-failures').textContent = ADB.num(stats.failures);
     $('#meta-exit').textContent = (stats.lastExitCode === null ||
@@ -78,6 +80,32 @@
       if (scripts[i].id === id) return scripts[i];
     }
     return null;
+  }
+
+  /* 参数是跟着脚本存的：切换脚本时输入框换成这一份，执行时用输入框里的。
+     正在输入时不覆盖，否则状态推送会把用户打的字冲掉。 */
+  function syncArgsInput(script) {
+    if (!argsInput) return;
+    argsInput.disabled = !script;
+    if (document.activeElement === argsInput) return;
+    var value = script ? (script.args || '') : '';
+    if (argsInput.value !== value) argsInput.value = value;
+  }
+
+  function saveArgs(id) {
+    if (!id || !argsInput) return;
+    var text = argsInput.value.trim();
+    var script = findScript(id);
+    if (script && (script.args || '') === text) return;
+    client.post('scripts/args', { id: id, args: text }).then(function (data) {
+      if (!data.ok) {
+        setStatus(data.error || '参数保存失败', true);
+        return;
+      }
+      // 用发请求时的 id —— 这期间可能已经切到别的脚本了
+      var saved = findScript(id);
+      if (saved) saved.args = (data.script && data.script.args) || '';
+    }).catch(function () { /* 后端没响应时连接状态会提示 */ });
   }
 
   function updateTargetLabel() {
@@ -120,7 +148,7 @@
     if (list.querySelector('.script-rename')) return;
 
     var key = scripts.map(function (s) {
-      return [s.id, s.name, s.size, s.lastRunAt, s.lastExitCode].join('|');
+      return [s.id, s.name, s.size, s.args || '', s.lastRunAt, s.lastExitCode].join('|');
     }).join('\n') + '#' + selectedId + '#' + runningId;
     if (key === renderKey) return;
     renderKey = key;
@@ -194,7 +222,8 @@
     li.appendChild(meta);
     li.appendChild(ops);
 
-    li.title = item.name + '\n' + meta.textContent;
+    li.title = item.name + '\n' + meta.textContent +
+      (item.args ? '\n参数：' + item.args : '');
     li.addEventListener('click', function (ev) {
       if (ev.target.closest && ev.target.closest('button')) return;
       selectScript(item.id);
@@ -214,6 +243,7 @@
     selectedId = id;
     renderKey = '';
     renderScripts();
+    syncArgsInput(findScript(id));
     syncButtons();
     // 只发 selected，其余字段由服务端沿用当前配置
     client.post('config', { selected: id });
@@ -433,8 +463,14 @@
     cfgDirty = false;
   }
 
-  form.addEventListener('input', function () { cfgDirty = true; });
-  form.addEventListener('change', function () { cfgDirty = true; });
+  // 脚本参数跟着选中的脚本存，不属于这份全局配置：打字时别把它算成配置改动，
+  // 否则设备列表刷新会因为 cfgDirty 停下来
+  function markDirty(ev) {
+    if (ev.target === argsInput) return;
+    cfgDirty = true;
+  }
+  form.addEventListener('input', markDirty);
+  form.addEventListener('change', markDirty);
 
   form.addEventListener('submit', function (ev) {
     ev.preventDefault();
@@ -458,14 +494,29 @@
 
   /* ---------------- 执行 ---------------- */
 
+  if (argsInput) {
+    // change 在输入框失焦时才触发，正好是「这一串输完了」的时刻
+    argsInput.addEventListener('change', function () { saveArgs(selectedId); });
+    // 它在「保存参数」那个表单里，回车默认会提交整份全局配置；这里改成只存脚本参数
+    argsInput.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      saveArgs(selectedId);
+    });
+  }
+
   $('#btn-run').addEventListener('click', function () {
     if (!selectedId) {
       setStatus('先导入并选一个脚本', true);
       return;
     }
-    // 先落盘参数，免得执行用的还是上一次的设置
+    // 先落盘参数，免得执行用的还是上一次的设置；脚本参数跟着 start 一起发，
+    // 后端收到就记到这个脚本名下，执行用的就是页面上这一串
     client.saveConfig(collectConfig()).then(function () {
-      return client.start({ scriptId: selectedId });
+      return client.start({
+        scriptId: selectedId,
+        args: argsInput ? argsInput.value.trim() : ''
+      });
     }).then(function (data) {
       if (data && !data.ok) setStatus(data.message || '启动失败', true);
     }).catch(function () {

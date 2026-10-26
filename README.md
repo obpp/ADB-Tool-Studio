@@ -278,6 +278,7 @@ adb -s <序列号> shell sh /data/local/tmp/ats-0d30815d-check.sh
 | 目标设备 | 不选时只有「恰好一台在线」才自动选；多台必须自己选 |
 | 远程目录 | 默认 `/data/local/tmp`，必须是 `/` 开头的绝对路径 |
 | 超时 | 单次执行上限，默认 60 秒 |
+| 脚本参数 | 跟着选中的脚本保存；空格分隔，支持 `"..."` 和 `'...'`，执行时接在设备上的 `sh` 命令后面 |
 
 脚本库：
 
@@ -287,6 +288,9 @@ adb -s <序列号> shell sh /data/local/tmp/ats-0d30815d-check.sh
 - **每次执行都重新推一份**，不做「设备上已有就跳过」：列表里显示的是哪份，跑的就一定是哪份
 - 设备上的文件名带脚本 id 前缀（`ats-0d30815d-check.sh`），两个同名脚本不会互相覆盖
 - 一次只跑一个，跑的时候不能删、不能再启动第二个
+- **参数跟着脚本存**：切回这个脚本时输入框里还是上次那串，失焦和执行前各存一次。
+  带空格的参数要加引号（`--name "hello world"`）—— 后端会按设备上 `sh` 的规则再转义一层，
+  不会到设备那头被拆成两个；引号没闭合直接拒绝执行，不会推到板子上白跑一趟
 - 「停止」只是断开 adb 连接，**设备上正在跑的命令不一定跟着退出**
 
 ### 4. 替换镜像（`/replace-image`）
@@ -391,6 +395,7 @@ adb -s <序列号> shell "reboot"
 | POST | `/api/script_runner/scripts/import?name=` | 导入脚本，body 是原始字节（上限 2 MB） |
 | POST | `/api/script_runner/scripts/rename` | 脚本改名 |
 | POST | `/api/script_runner/scripts/delete` | 删除脚本（执行中返回 409） |
+| POST | `/api/script_runner/scripts/args` | 保存某个脚本的参数（`id` + `args`） |
 | POST | `/api/replace_image/presets/save` | 新建或更新镜像预设 |
 | POST | `/api/replace_image/presets/delete` | 删除预设（烧写中返回 409） |
 | POST | `/api/replace_image/fs/list` | 列本机目录，供网页版的镜像浏览器用（`path` + `all`） |

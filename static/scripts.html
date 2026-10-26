@@ -76,6 +76,13 @@
             <input id="cfg-timeout" type="number" min="5" max="3600" step="1">
           </label>
 
+          <label class="field span-2 script-args">
+            <span class="field-label">脚本参数</span>
+            <input id="cfg-args" type="text" autocomplete="off" spellcheck="false" disabled
+                   placeholder="空格分隔，支持 &quot;...&quot; 和 '...'；例如 --mode 2 &quot;hello world&quot;">
+            <span class="hint">接在设备上的 sh 命令后面，跟着选中的脚本保存，执行前自动存一次。</span>
+          </label>
+
           <div class="form-actions span-2">
             <button class="btn primary" type="submit">保存参数</button>
             <span id="cfg-status" class="form-status" role="status"></span>
