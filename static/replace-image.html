@@ -107,6 +107,11 @@
             <input id="preset-name" type="text" autocomplete="off" placeholder="比如 RK3576 boot">
           </label>
 
+          <label class="field span-2">
+            <span class="field-label">推送目录（设备上）</span>
+            <input id="preset-pushdir" type="text" autocomplete="off" spellcheck="false">
+          </label>
+
           <div class="field span-2">
             <span class="field-label">镜像与写入目标</span>
             <ul id="image-rows" class="image-rows" aria-label="镜像与写入目标列表"></ul>
@@ -117,11 +122,6 @@
                 同一行写多个目标时用空格或逗号分隔。</span>
             </div>
           </div>
-
-          <label class="field span-2">
-            <span class="field-label">推送目录（设备上）</span>
-            <input id="preset-pushdir" type="text" autocomplete="off" spellcheck="false">
-          </label>
 
           <label class="check span-2">
             <input id="preset-reboot" type="checkbox" checked> 写入完成后重启设备

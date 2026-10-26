@@ -64,7 +64,11 @@
       $('#kpi-fails-hint').textContent = '请检查连接与调试授权';
     }
 
-    renderTarget(s.config, extra.devices || devices);
+    // 长驻监听会在设备上线/掉线时推 state，列表和状态栏都跟着立刻更新
+    devices = extra.devices || devices;
+    renderDevices();
+    renderTarget(s.config, devices);
+    fillSerialOptions(s.config ? s.config.serial : '');
 
     var running = s.status !== 'idle';
     $('#btn-start').disabled = running;

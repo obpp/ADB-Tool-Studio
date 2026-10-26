@@ -5,6 +5,7 @@ always-adb 工具在用；将来别的工具要调 adb 也走这里。
 """
 
 import os
+import re
 import shutil
 import subprocess
 
@@ -46,6 +47,23 @@ def resolve_adb():
         if os.sep in cand and os.path.isfile(cand) and os.access(cand, os.X_OK):
             return cand
     return "adb"
+
+
+# 设备上的 sh 里没有特殊含义的字符，其余一律加单引号
+_SAFE_ARG = re.compile(r"^[A-Za-z0-9_./:=@%+,^-]+$")
+
+
+def device_quote(token):
+    """给设备上的 sh 转义一个参数：安全字符原样，其余用单引号包起来。
+
+    单个引号写成 '\\''（闭合、转义、再打开），POSIX shell 都认这一套。
+
+    只在「命令要拼成一条字符串交给 adb shell」时用：adb shell 会把后面的参数
+    用空格拼起来送过去，不经过本地 shell，带空格的参数不自己引号就会被拆开。
+    """
+    if token and _SAFE_ARG.match(token):
+        return token
+    return "'" + token.replace("'", "'\\''") + "'"
 
 
 def build_command(adb_path, serial, args):

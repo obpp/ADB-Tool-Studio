@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>推送文件 · ADB Tool Studio</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-tool="push_file">
+
+<div class="app">
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+
+    <header class="nameplate">
+      <div class="nameplate-top">
+        <span id="badge" class="badge" data-tone="idle" aria-live="polite">
+          <span class="badge-icon" aria-hidden="true">■</span><span class="badge-text">已停止</span>
+        </span>
+        <h1>推送文件</h1>
+        <span class="uptime" id="meta-uptime">—</span>
+      </div>
+
+      <!-- 功能简述：内容由 shell.js 从 /api/tools 的 desc 填进来 -->
+      <p class="nameplate-desc" id="tool-desc"></p>
+
+      <div class="readout" role="group" aria-label="推送统计">
+        <span class="ro"><span class="ro-k">待推送</span><span class="ro-v" id="meta-count">0</span></span>
+        <span class="ro"><span class="ro-k">设备</span><span class="ro-v" id="meta-target">—</span></span>
+        <span class="ro"><span class="ro-k">推送目录</span><span class="ro-v" id="meta-dir">—</span></span>
+        <span class="ro"><span class="ro-k">已推送</span><span class="ro-v" id="kpi-pushed">0</span></span>
+        <span class="ro"><span class="ro-k">失败</span><span class="ro-v" id="kpi-failed">0</span></span>
+        <span class="ro"><span class="ro-k">上次退出码</span><span class="ro-v" id="meta-exit">—</span></span>
+        <span class="ro"><span class="ro-k">上次耗时</span><span class="ro-v" id="meta-elapsed">—</span></span>
+      </div>
+
+      <div class="actions">
+        <button id="btn-run" class="btn primary" type="button">开始推送</button>
+        <button id="btn-stop" class="btn danger" type="button" disabled>停止</button>
+      </div>
+    </header>
+
+    <div class="rule"></div>
+
+    <div class="workspace">
+
+      <section class="pane pane-params pane-push">
+
+        <div class="pane-head">
+          <h2 class="pane-title">参数</h2>
+        </div>
+
+        <form id="config-form" class="config-grid" autocomplete="off">
+
+          <label class="field span-2">
+            <span class="field-label">adb 路径</span>
+            <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
+          </label>
+
+          <div class="field span-2">
+            <label class="field-label" for="cfg-serial">目标设备</label>
+            <span class="field-inline">
+              <select id="cfg-serial"></select>
+              <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
+            </span>
+          </div>
+        </form>
+
+        <div class="pane-head">
+          <h2 class="pane-title">源文件</h2>
+          <span id="file-status" class="form-status" role="status"></span>
+          <div class="pane-tools">
+            <button id="btn-add" class="btn ghost small" type="button">选择文件…</button>
+            <button id="btn-clear-files" class="btn ghost small" type="button">清空列表</button>
+          </div>
+        </div>
+        <input id="file-input" type="file" multiple hidden>
+
+        <!-- 拖放范围就是这个虚线框：拖到外面不会触发上传 -->
+        <div id="push-drop" class="push-drop">
+          <ul id="file-list" class="push-files" aria-label="待推送文件">
+            <li class="dev-empty">还没有文件。把文件拖进这里，或点「选择文件…」。</li>
+          </ul>
+          <p class="hint">文件会先传到本机的临时目录，再用 adb push 推过去；
+            设备上同名的文件会被覆盖。</p>
+        </div>
+
+        <div class="pane-head">
+          <h2 class="pane-title">推送目录</h2>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="cfg-pushdir">设备上的目录</label>
+          <span class="field-inline">
+            <input id="cfg-pushdir" type="text" autocomplete="off" spellcheck="false"
+                   placeholder="/data/local/tmp">
+            <button id="btn-browse" class="btn ghost small" type="button">浏览</button>
+          </span>
+          <span class="push-chips">
+            <button class="btn ghost small" type="button" data-dir="/data/local/tmp">/data/local/tmp</button>
+            <button class="btn ghost small" type="button" data-dir="/sdcard/Download">/sdcard/Download</button>
+            <button class="btn ghost small" type="button" data-dir="/mnt">/mnt</button>
+          </span>
+          <span class="hint">必须是 / 开头的绝对路径。文件按原名推到这个目录下。</span>
+        </div>
+
+        <div class="form-actions">
+          <button id="btn-save" class="btn primary" type="button">保存参数</button>
+          <span id="cfg-status" class="form-status" role="status"></span>
+        </div>
+
+      </section>
+
+      <section class="pane pane-log">
+        <div class="pane-head">
+          <h2 class="pane-title">日志</h2>
+          <div class="pane-tools">
+            <label class="check small"><input id="follow" type="checkbox" checked> 跟随最新</label>
+            <button id="btn-clear" class="btn ghost small" type="button">清空</button>
+          </div>
+        </div>
+        <div id="log" class="log" role="log" aria-label="推送日志"></div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- 设备目录浏览器：只列目录，服务端执行 adb shell ls -->
+<div class="picker" id="picker" hidden role="dialog" aria-modal="true" aria-labelledby="picker-title">
+  <div class="picker-panel">
+    <div class="pane-head">
+      <h2 class="pane-title" id="picker-title">选择设备目录</h2>
+      <button id="picker-close" class="btn ghost small" type="button">关闭</button>
+    </div>
+
+    <div class="picker-tools">
+      <button id="picker-up" class="btn ghost small" type="button">上一级</button>
+      <button id="picker-refresh" class="btn ghost small" type="button">刷新</button>
+      <span class="hint">只列目录；选好后点「用这个目录」。</span>
+    </div>
+
+    <input id="picker-path" class="picker-path" type="text" readonly aria-label="当前目录">
+
+    <div id="picker-error" class="picker-error" role="status"></div>
+    <ul id="picker-list" class="picker-list" aria-label="设备目录"></ul>
+
+    <div class="picker-actions">
+      <button id="picker-use" class="btn primary" type="button">用这个目录</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/shell.js"></script>
+<script src="/static/push-file.js"></script>
+</body>
+</html>

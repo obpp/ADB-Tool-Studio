@@ -202,20 +202,33 @@ a { color: var(--accent); text-underline-offset: 2px; }
 }
 
 .conn {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 7px;
+  max-width: 100%;
+  min-width: 0;
   font-size: 11.5px;
   color: var(--ink-3);
+}
+.conn[hidden] { display: none; }
+.conn-label { flex: none; }
+.conn-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .conn-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--ink-3);
   flex: none;
 }
-.conn[data-state="open"] .conn-dot { background: var(--good); }
-.conn[data-state="connecting"] .conn-dot,
-.conn[data-state="retry"] .conn-dot { background: var(--warning); }
+#conn[data-state="open"] .conn-dot { background: var(--good); }
+#conn[data-state="connecting"] .conn-dot,
+#conn[data-state="retry"] .conn-dot { background: var(--warning); }
+/* 设备行的灯跟着设备状态走：在线绿、待授权/离线黄、无设备灰 */
+#dev-status[data-tone="ok"] .conn-dot { background: var(--good); }
+#dev-status[data-tone="warn"] .conn-dot { background: var(--warning); }
 
 .sidebar-actions { display: flex; gap: 6px; }
 .sidebar-actions .btn { flex: 1; }
@@ -581,6 +594,9 @@ input:focus-visible, select:focus-visible {
   background: var(--accent-wash);
 }
 
+/* 脚本参数：跟着选中脚本存，没选中脚本时禁用 */
+.script-args input:disabled { opacity: 0.55; cursor: not-allowed; }
+
 .hint {
   margin: 8px 0 0;
   font-size: 11.5px;
@@ -594,7 +610,7 @@ input:focus-visible, select:focus-visible {
 }
 
 /* 列表标题行里的状态字：靠右挤在按钮旁边 */
-#script-status, #preset-status { margin-left: auto; }
+#script-status, #preset-status, #file-status { margin-left: auto; }
 
 /* 字段下方的说明文字，出错时变红 */
 .hint[data-tone="error"] { color: var(--crit-ink); }
@@ -631,6 +647,44 @@ input:focus-visible, select:focus-visible {
   flex-wrap: wrap;
 }
 .image-rows-actions .hint { flex: 1; min-width: 200px; margin: 2px 0 0; }
+
+/* ---------------------------------------------------------------- 推送文件 */
+
+/* 拖放区固定高度：文件多了在框里滚，不把下面的推送目录顶出视野。
+   边框是虚线，和脚本库的拖放区用同一种语汇。 */
+.push-drop {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: 200px;
+  padding: 6px 10px;
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+  overflow-y: auto;
+  transition: border-color .12s, background-color .12s;
+}
+.push-drop.is-drop {
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.push-files { list-style: none; margin: 0; padding: 0; }
+/* 这里的行只用来展示和删，不提供“选中”，别让悬停像能点 */
+.push-files .script { cursor: default; }
+.push-files .script:hover { background: transparent; }
+
+/* 文件少的时候把说明沉到框底，别顶着列表 */
+.push-drop > .hint { margin-top: auto; }
+
+/* 推送目录字段和保存按钮不在一个 form 网格里，自己留出间距 */
+.pane-push > .form-actions { margin-top: 14px; }
+
+/* 常用目录：点一下填进输入框，还是要按保存才生效 */
+.push-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.push-chips .btn { font-family: var(--mono); }
+
+/* 目录不是绝对路径时描红，和下面的提示文字一起看 */
+input[data-tone="error"] { border-color: var(--critical); }
 
 /* ---------------------------------------------------------------- 确认条 */
 
@@ -770,6 +824,7 @@ input:focus-visible, select:focus-visible {
   font-size: 12px;
   color: var(--ink-3);
 }
+.picker-actions { display: flex; gap: 8px; margin-top: 12px; }
 
 /* 隧道页的「服务端环境变量」提醒，复用上面的遮罩，面板窄一点 */
 .env-panel { width: min(560px, 100%); }
@@ -881,8 +936,8 @@ input:focus-visible, select:focus-visible {
   .chan-body { display: none; }
   .chan-glyph { display: block; }
   .sidebar-foot { padding: 12px 8px; align-items: center; }
-  .conn { justify-content: center; }
-  .conn-text { display: none; }
+  .conn { justify-content: center; max-width: none; }
+  .conn-label, .conn-text { display: none; }
   .sidebar-actions { flex-direction: column; width: 100%; }
   .sidebar-actions .btn { padding: 7px 0; justify-content: center; font-size: 11px; }
   /* 图标条里放不下四个字，换成字形；完整说法留在 aria-label / title 上 */
