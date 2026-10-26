@@ -1,12 +1,10 @@
 # ADB Tool Studio
 
-`my-adb-app` 的桌面版：同一个后端，外面套一层 Windows 原生窗口 + 托盘，可以打包成 exe。
+adb 小工具集合：一个 Python 标准库后端 + 一套纯静态页面，浏览器直接打开就能用；
+再套一层 Windows 原生窗口 + 托盘，就能打包成 exe。
 
-功能完全一样（always-adb、adb 反向隧道、脚本执行、替换镜像、推送文件），**网页版那一套原样保留** ——
-`python3 server.py` 照样能跑，两边不会打架。
-
-> 这份是从 `../my-adb-app` 复制出来的独立副本，原目录没被动过。
-> 以后改了 `tools/` 或 `static/` 的公共逻辑，记得两边同步。
+功能包括 always-adb、adb 反向隧道、脚本执行、替换镜像、推送文件。网页版和桌面版共用
+同一份 `server.py` 和 `static/`，`python3 server.py` 照样能跑，不用装桌面依赖。
 
 ## 桌面版多了什么
 

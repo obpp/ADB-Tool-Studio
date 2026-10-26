@@ -104,9 +104,6 @@ set "KILLED=0"
 set "LOCKED=0"
 taskkill /f /im ADB-Tool-Studio.exe >nul 2>nul
 if not errorlevel 1 set "KILLED=1"
-REM 改名前的旧 exe 也可能还缩在托盘里，一起关掉
-taskkill /f /im my-adb-app.exe >nul 2>nul
-if not errorlevel 1 set "KILLED=1"
 if "%KILLED%"=="1" (
     echo     发现 ADB-Tool-Studio.exe 还在跑，已经关掉它。
     echo     多半是之前双击开的那个缩在托盘里没退。
@@ -116,9 +113,6 @@ if "%KILLED%"=="1" (
 )
 call :delstale "dist\ADB-Tool-Studio.exe"
 call :delstale "dist\ADB-Tool-Studio\ADB-Tool-Studio.exe"
-REM 改名前的产物，留着只会让人双击错文件
-call :delstale "dist\my-adb-app.exe"
-call :delstale "dist\my-adb-app\my-adb-app.exe"
 if "%LOCKED%"=="1" exit /b 1
 exit /b 0
 

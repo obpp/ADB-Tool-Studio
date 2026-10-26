@@ -12,9 +12,6 @@ import apppaths
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "ADB-Tool-Studio"
-# 改名前的自启项：还留着的话，开机时会去拉一个已经不存在的旧 exe。
-# 每次写设置时顺手清掉，不单独做迁移。
-_LEGACY_VALUES = ("my-adb-app",)
 
 
 def launch_command():
@@ -50,11 +47,6 @@ def set_enabled(enabled):
     try:
         with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, RUN_KEY, 0,
                                 winreg.KEY_SET_VALUE) as key:
-            for legacy in _LEGACY_VALUES:
-                try:
-                    winreg.DeleteValue(key, legacy)
-                except FileNotFoundError:
-                    pass
             if enabled:
                 winreg.SetValueEx(key, VALUE_NAME, 0, winreg.REG_SZ, launch_command())
             else:
