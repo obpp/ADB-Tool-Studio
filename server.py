@@ -178,6 +178,11 @@ class Handler(BaseHTTPRequestHandler):
             if action == "events":
                 return self._sse(tool)
             if action == "devices" and hasattr(tool, "refresh_devices"):
+                # 页面第一次要设备列表时顺手把长驻监听拉起来，之后设备
+                # 上线/掉线会通过 SSE 推过去，不用等下一次轮询。
+                ensure = getattr(tool, "ensure_device_watch", None)
+                if ensure is not None:
+                    ensure()
                 devices, err = tool.refresh_devices()
                 tool.publish_state()
                 return self._send_json({"devices": devices, "error": err})
@@ -235,6 +240,9 @@ class Handler(BaseHTTPRequestHandler):
                 saved = False
                 tool.log("warn", "配置写入失败: %s" % exc)
             tool.log("info", "配置已更新")
+            kick = getattr(tool, "kick_device_watch", None)
+            if kick is not None:
+                kick()
             tool.publish_state()
             return self._send_json({"ok": True, "saved": saved, "config": tool.config})
 
@@ -322,6 +330,9 @@ class AppServer(object):
     def stop(self):
         for tool in registry.all():
             try:
+                stop_watch = getattr(tool, "stop_device_watch", None)
+                if stop_watch is not None:
+                    stop_watch()              # 收拾长驻的 adb wait-for-device
                 if tool.is_alive():
                     tool.stop()               # 顺带杀掉子进程（比如 ssh）
                 else:

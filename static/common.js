@@ -101,6 +101,19 @@ window.ADB = (function () {
     if (t) t.textContent = text;
   }
 
+  // 侧边栏的“推送”只是 HTTP 那一行的后缀，不影响 HTTP 主状态，
+  // 免得 SSE 断线时把“已连接”反复改回“重连中”。
+  function setPush(state) {
+    if (window.SHELL && window.SHELL.setPush) window.SHELL.setPush(state);
+  }
+
+  // 当前页的 SSE 状态里带着设备列表，顺手喂给侧边栏，设备上线就能立刻看到
+  function setShellDevices(data) {
+    if (!window.SHELL || !window.SHELL.setDevices) return;
+    window.SHELL.setDevices(
+      data && data.extra ? data.extra.devices : undefined, true);
+  }
+
   /* ---------------- 状态徽标 ---------------- */
 
   function paintBadge(el, status, override) {
@@ -204,17 +217,19 @@ window.ADB = (function () {
     var self = this;
     var es = new EventSource('/api/' + this.id + '/events');
 
-    es.addEventListener('open', function () { setConn('open', '已连接'); });
+    es.addEventListener('open', function () { setPush('open'); });
 
     es.addEventListener('snapshot', function (ev) {
       var data = JSON.parse(ev.data);
       self.state = data;
+      setShellDevices(data);
       if (onSnapshot) onSnapshot(data);
       if (self._state) self._state(data);
     });
 
     es.addEventListener('state', function (ev) {
       self.state = JSON.parse(ev.data);
+      setShellDevices(self.state);
       if (self._state) self._state(self.state);
     });
 
@@ -222,8 +237,8 @@ window.ADB = (function () {
       if (self._log) self._log(JSON.parse(ev.data));
     });
 
-    // EventSource 自己会重连，这里只反映状态
-    es.onerror = function () { setConn('retry', '重连中…'); };
+    // EventSource 自己会重连，这里只反映“推送”状态，不影响 HTTP 主状态
+    es.onerror = function () { setPush('retry'); };
     this.source = es;
     return es;
   };

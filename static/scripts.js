@@ -43,6 +43,8 @@
     scripts = extra.scripts || [];
     selectedId = extra.selected || '';
     runningId = extra.runningId || '';
+    // 后端的长驻监听会在设备上线时推 state，这里跟着更新，别等 15 秒轮询
+    devices = extra.devices || devices;
 
     var override = null;
     if (s.status === 'idle' && stats.lastExitCode) {
@@ -60,6 +62,7 @@
       ? stats.lastDuration.toFixed(1) + ' 秒' : '—';
 
     updateTargetLabel();
+    fillSerialOptions();
     renderScripts();
     syncButtons();
   }

@@ -17,6 +17,8 @@ import threading
 import time
 from collections import deque
 
+import devicewatch
+
 LEVELS = ("cmd", "info", "ok", "warn", "err")
 
 STATUS_IDLE = "idle"
@@ -101,6 +103,8 @@ class Tool(object):
         self.thread = None
         self.process = None          # 子类跑外部进程时放这里，便于 stop 时收拾
         self.start_options = {}      # start() 时页面传来的选项（如 {"once": true}）
+        self._device_watch = None    # 长驻设备监听，第一次要设备列表时懒创建
+        self._last_online = None     # 上一次已知的在线序列号，用来判断“上线”事件
         self.config = self.load_config()
         self.stats = self.default_stats()
 
@@ -134,6 +138,57 @@ class Tool(object):
     def preview(self, query):
         """给 GET /api/<id>/command 用：把一组参数变成一条命令行预览。"""
         return None
+
+    # ---------------- 设备监听 ----------------
+
+    # 子类只要实现了 refresh_devices()，就能用这套长驻监听。第一次有人
+    # 打开页面要设备列表时启动，之后设备上线/掉线会主动推 state，页面不用
+    # 再靠定时轮询等。没有设备时线程阻塞在 adb wait-for-device 上，几乎不耗资源。
+
+    def ensure_device_watch(self):
+        if not hasattr(self, "refresh_devices"):
+            return
+        with self.lock:
+            if self._device_watch is not None:
+                return
+            self._device_watch = devicewatch.DeviceWatcher(
+                lambda: dict(self.config), self._on_watched_devices)
+        self._device_watch.start()
+
+    def kick_device_watch(self):
+        """配置里的 adb 路径/序列号改了，让监听用新配置重新等。"""
+        watcher = self._device_watch
+        if watcher is not None:
+            watcher.kick()
+
+    def stop_device_watch(self):
+        watcher = self._device_watch
+        self._device_watch = None
+        if watcher is not None:
+            watcher.stop()
+
+    def apply_devices(self, devices, error=""):
+        """把一批设备列表写进工具状态。子类都沿用 devices/devices_error/deviceCount。"""
+        with self.lock:
+            self.devices = list(devices)
+            self.devices_error = error
+            self.stats["deviceCount"] = len(devices)
+
+    def _on_watched_devices(self, devices):
+        online = [d.get("serial", "") for d in devices if d.get("state") == "device"]
+        previous = self._last_online
+        self._last_online = online
+
+        self.apply_devices(devices)
+        # 第一次拿到列表只建基线，不记日志（否则一打开页面就冒一条“上线”）
+        if previous is not None:
+            for serial in online:
+                if serial and serial not in previous:
+                    self.log("ok", "设备已上线: %s" % serial)
+            for serial in previous:
+                if serial and serial not in online:
+                    self.log("warn", "设备已离线: %s" % serial)
+        self.publish_state()
 
     # ---------------- 配置持久化 ----------------
 
