@@ -2,7 +2,7 @@
 
 `my-adb-app` 的桌面版：同一个后端，外面套一层 Windows 原生窗口 + 托盘，可以打包成 exe。
 
-功能完全一样（always-adb、adb 反向隧道、脚本执行、替换镜像），**网页版那一套原样保留** ——
+功能完全一样（always-adb、adb 反向隧道、脚本执行、替换镜像、推送文件），**网页版那一套原样保留** ——
 `python3 server.py` 照样能跑，两边不会打架。
 
 > 这份是从 `../my-adb-app` 复制出来的独立副本，原目录没被动过。
@@ -353,6 +353,24 @@ adb -s <序列号> shell "reboot"
 - 网页版退回的目录浏览器能列本机任意目录，这是「只记录路径」的代价；服务默认只监听 `127.0.0.1`，用 `--host 0.0.0.0` 时请记住整站本来就没有鉴权
 - 桌面版的选文件对话框走的是 pywebview 的 `js_api`（`PageApi.pick_image`），只有 exe / `dev.bat` 里才有；浏览器里没有这座桥
 
+### 5. 推送文件（`/push-file`）
+
+普通的 `adb push`：把本地文件搬到设备上的指定目录，**不写分区、不重启、不保存预设**。
+
+- 源文件有两种加法：拖进那个虚线框（拖拽范围就是框本身，拖到框外不会上传），
+  或点「选择文件…」多选。桌面版和网页版都这样 —— 窗口里的页面拿不到本机完整路径，
+  能拿到的只有 `File` 对象，所以统一「先传到后端再推」
+- 上传是流式写盘（临时目录 `ats-push-*`），不把整个文件读进内存；程序退出时删掉临时副本。
+  本机的原文件不会被复制进程序目录，也不会被改
+- 推送目录自己填，或点「浏览」在设备上选：只列目录（`adb shell ls -a -p -L`），
+  路径带空格会按设备上 `sh` 的规则转义。快捷按钮 `/data/local/tmp`（默认）、
+  `/sdcard/Download`、`/mnt` 只是填进输入框，仍要保存
+- 设备上同名文件会被直接覆盖，日志里会写最终路径；一批里有同名文件时先警告
+- 一个文件失败不影响后面的，最后汇总「成功 N 个，失败 M 个」
+- 「停止」只打断**正在推的那一个**；已经推完的文件不会回滚，当前这个可能只推了一半
+- 单个文件上限 4 GB；推送超时按大小放宽：至少 120 秒，每 1 MB 再加 1 秒，最多 7200 秒
+- 推送目录必须是 `/` 开头的绝对路径，相对路径在页面上就会被拦下
+
 ## 侧边栏底部的两个状态
 
 侧边栏最下面有两行独立的状态，颜色和文字同时表意：
@@ -382,12 +400,12 @@ adb -s <序列号> shell "reboot"
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/` | 一级页面 |
-| GET | `/<page>` | 二级页面，如 `/always-adb`、`/ssh-tunnel`、`/scripts`、`/replace-image` |
+| GET | `/<page>` | 二级页面，如 `/always-adb`、`/ssh-tunnel`、`/scripts`、`/replace-image`、`/push-file` |
 | GET | `/api/tools` | 所有工具的状态摘要（一级页面用） |
 | GET | `/api/<id>/state` | 单个工具的全量状态 + 最近 500 条日志 |
 | GET | `/api/<id>/events` | SSE 流，事件：`snapshot` / `state` / `log` |
-| GET | `/api/<id>/devices` | 刷新并返回设备列表（always-adb、脚本执行、替换镜像） |
-| POST | `/api/<id>/start` | 启动，body 可带选项（always-adb `once`、脚本执行 `scriptId`、替换镜像 `presetId`） |
+| GET | `/api/<id>/devices` | 刷新并返回设备列表（always-adb、脚本执行、替换镜像、推送文件） |
+| POST | `/api/<id>/start` | 启动，body 可带选项（always-adb `once`、脚本执行 `scriptId`、替换镜像 `presetId`；推送文件不用选项） |
 | POST | `/api/<id>/stop` | 停止，会打断正在进行的等待并杀掉子进程 |
 | POST | `/api/<id>/config` | 更新配置，按补丁合并，字段范围夹紧后落盘 |
 | POST | `/api/<id>/preview` | 只返回命令行预览，不执行（隧道） |
@@ -400,9 +418,17 @@ adb -s <序列号> shell "reboot"
 | POST | `/api/replace_image/presets/delete` | 删除预设（烧写中返回 409） |
 | POST | `/api/replace_image/fs/list` | 列本机目录，供网页版的镜像浏览器用（`path` + `all`） |
 | POST | `/api/replace_image/fs/stat` | 查一个本地文件是否存在、多大 |
+| POST | `/api/push_file/files/upload?name=` | 上传一个待推送文件，body 是原始字节（流式写盘，上限 4 GB，必须带 `Content-Length`） |
+| POST | `/api/push_file/files/remove` | 从待推送列表移除一个（`id`；推送中返回 409） |
+| POST | `/api/push_file/files/clear` | 清空待推送列表（推送中返回 409） |
+| POST | `/api/push_file/fs/list` | 列设备上的目录，供目录浏览器用（`path`；只返回目录） |
 
 工具自己的动作走 `Tool.api()` 这个通用出口（`server.py` 里不用为每个功能加分支），
 返回 `None` 表示不认识这个 action，最后统一落到 404。
+
+文件上传是唯一的例外：`files/upload` 在 `server.py` 里赶在 `_read_body()` 之前接走，
+直接交给工具的 `upload(rfile, length, query)` 边读边写盘 —— 通用那条路有 2 MB 上限，
+而这里可能是几个 GB。响应用完就关连接（中途拒绝时请求体可能没读完，keep-alive 会串包）。
 
 设备列表不靠前端轮询来发现上线：页面第一次请求 `/api/<id>/devices` 后，后端会为这个工具
 常驻一条 `adb wait-for-device`（当前无设备）或 `adb -s <序列号> wait-for-disconnect`（已有设备）。

@@ -37,9 +37,6 @@ MAX_SCRIPT_BYTES = 2 * 1024 * 1024
 # 参数串上限。真要传很长的参数，写进脚本里比塞在输入框里靠谱。
 MAX_ARGS_CHARS = 1024
 
-# 这些字符在设备上的 sh 里没有特殊含义，可以原样传；其余一律加单引号
-_SAFE_ARG = re.compile(r"^[A-Za-z0-9_./:=@%+,^-]+$")
-
 # 文件名里不能出现的字符：Windows 的保留字符 + 控制字符
 _BAD_NAME = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
@@ -159,16 +156,6 @@ def check_args(text):
     except ValueError as exc:
         return str(exc)
     return ""
-
-
-def device_quote(token):
-    """给设备上的 sh 转义一个参数：安全字符原样，其余用单引号包起来。
-
-    单个引号写成 '\\''（闭合、转义、再打开），POSIX shell 都认这一套。
-    """
-    if token and _SAFE_ARG.match(token):
-        return token
-    return "'" + token.replace("'", "'\\''") + "'"
 
 
 def human_size(n):
@@ -659,7 +646,7 @@ class ScriptRunnerTool(Tool):
         # adb shell 是把后面的参数用空格拼成一条命令交给设备上的 sh 的，
         # 不经过本地 shell，所以带空格的参数到那边会被拆开。这里自己按 POSIX
         # 规则把每个参数引号包好，整体作为一条命令传过去。
-        device_cmd = " ".join(device_quote(tok) for tok in ["sh", remote] + argv)
+        device_cmd = " ".join(adbkit.device_quote(tok) for tok in ["sh", remote] + argv)
         cmd = adbkit.build_command(cfg["adbPath"], serial, ["shell", device_cmd])
 
         # 日志里按参数分开显示，和手敲的写法一致，方便直接抄走

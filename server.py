@@ -203,6 +203,26 @@ class Handler(BaseHTTPRequestHandler):
             self.close_connection = True
             return self._send_json({"error": "没有这个工具: %s" % tool_id}, 404)
 
+        query = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
+
+        # 文件上传是流式的，必须赶在 _read_body() 之前接走：那里会按 2 MB
+        # 上限把整个 body 读进内存，而这里可能是几个 GB。工具自己边读边写盘。
+        uploader = getattr(tool, "upload", None)
+        if action == "files/upload" and uploader is not None:
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                length = 0
+            if length <= 0:
+                self.close_connection = True
+                return self._send_json(
+                    {"ok": False, "error": "缺少 Content-Length"}, 411)
+            # 中途放弃（比如超过上限直接拒绝）时 body 没读完，
+            # keep-alive 会把剩下的字节当成下一个请求，所以用完即关。
+            self.close_connection = True
+            payload, status = uploader(self.rfile, length, query)
+            return self._send_json(payload, status)
+
         raw = self._read_body()
         if raw is None:
             return self._send_json({"ok": False, "error": "请求体太大"}, 413)
@@ -216,8 +236,6 @@ class Handler(BaseHTTPRequestHandler):
                     data = decoded
             except (ValueError, UnicodeDecodeError):
                 pass
-
-        query = {k: v[0] for k, v in parse_qs(parsed_url.query).items() if v}
 
         if action == "start":
             ok, msg = tool.start(data)
@@ -337,6 +355,9 @@ class AppServer(object):
                     tool.stop()               # 顺带杀掉子进程（比如 ssh）
                 else:
                     tool.stop_event.set()
+                cleanup = getattr(tool, "cleanup", None)
+                if cleanup is not None:
+                    cleanup()                 # 删掉临时文件（推送文件的暂存）
             except Exception:
                 pass
         # 只有真的 start() 过才能调 shutdown()：BaseServer.shutdown() 会等
