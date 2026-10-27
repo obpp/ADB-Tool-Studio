@@ -300,6 +300,103 @@ window.ADB = (function () {
     }
   }
 
+  /* ---------------- 页面存活探针 / 错误上报 ----------------
+   * 桌面版把心跳和 JS 报错都写进 app.log。白屏时页面本身没东西可看，
+   * 至少后端能留下「最后一次心跳是什么时候、之前报了什么错」。
+   * 这里必须用原生 fetch，而且自己兜住异常 —— 上报通路不能反过来把页面搞崩。
+   */
+  var reportCount = 0;
+  var reportSeen = {};
+
+  function clientPage() {
+    try { return location.pathname || '/'; } catch (e) { return '/'; }
+  }
+
+  // 同一个标签页里换页要算同一个页面，所以 id 放 sessionStorage：
+  // 页面导航、刷新都沿用；关掉标签页/重开窗口才会换新的。
+  function clientId() {
+    try {
+      var id = sessionStorage.getItem('ats-ui-id');
+      if (!id) {
+        id = 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+        sessionStorage.setItem('ats-ui-id', id);
+      }
+      return id;
+    } catch (e) {
+      return 'anonymous';
+    }
+  }
+
+  var uiId = clientId();
+
+  function clientLog(level, message) {
+    if (reportCount >= 20) return;          // 页面真炸了也只报前 20 条，别刷爆日志
+    message = String(message || '').slice(0, 1000);
+    if (!message) return;
+    var now = Date.now();
+    var key = level + '|' + message;
+    if (reportSeen[key] && now - reportSeen[key] < 10000) return;
+    reportSeen[key] = now;
+    reportCount++;
+    try {
+      fetch('/api/client/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          level: level, message: message, page: clientPage()
+        }),
+        keepalive: true
+      }).catch(function () {});
+    } catch (e) { /* 后端没起来时静默 */ }
+  }
+
+  function heartbeat() {
+    try {
+      fetch('/api/client/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: uiId,
+          page: clientPage(),
+          visible: !document.hidden
+        })
+      }).catch(function () {});
+    } catch (e) { /* 同上 */ }
+  }
+
+  function describeError(ev) {
+    if (ev && ev.message) {
+      var where = (ev.filename || '') + ':' +
+        (ev.lineno || 0) + ':' + (ev.colno || 0);
+      return ev.message + ' @ ' + where +
+        (ev.error && ev.error.stack ? ' | ' + ev.error.stack : '');
+    }
+    var target = ev && ev.target;
+    if (target && target !== window) {
+      return '资源加载失败: ' +
+        (target.src || target.href || target.tagName || '未知');
+    }
+    return '未知错误';
+  }
+
+  // 资源加载错误（<script>/<link>）不冒泡，必须用捕获阶段
+  window.addEventListener('error', function (ev) {
+    clientLog('error', describeError(ev));
+  }, true);
+
+  window.addEventListener('unhandledrejection', function (ev) {
+    var reason = ev && ev.reason;
+    var text;
+    if (reason && reason.stack) text = reason.stack;
+    else if (reason && reason.message) text = reason.message;
+    else text = String(reason);
+    clientLog('reject', '未处理的 Promise 拒绝: ' + text);
+  });
+
+  heartbeat();
+  setInterval(heartbeat, 10000);
+  document.addEventListener('visibilitychange', heartbeat);
+
   return {
     $: $,
     getJSON: getJSON,

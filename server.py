@@ -25,6 +25,7 @@ import queue
 import socket
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -62,6 +63,84 @@ class Registry(object):
 
 
 registry = Registry(DATA_DIR, TOOL_CLASSES)
+
+
+# --------------------------------------------------------------------------
+# 页面存活探针 / 前端错误上报
+# --------------------------------------------------------------------------
+# 页面每 10 秒发一次心跳，JS 报错也会 POST 回来。桌面版把 sink 接到
+# desktop/app.py 的 log()，于是这些都落进 app.log —— 白屏时页面本身
+# 什么都显示不了，但至少能知道「最后一次心跳是什么时候、之前报了什么错」。
+# 网页版没有设置 sink，就退回 stderr（python3 server.py 的控制台）。
+
+_client_log_sink = None
+_ui_lock = threading.Lock()
+# 页面 id -> (最后心跳 time.time(), 路径, 是否可见)。id 存在 sessionStorage 里，
+# 所以同一个标签页里换页不会变成新页面；多开标签页则各算各的。
+_ui_clients = {}
+_UI_CLIENT_TTL = 3600
+_UI_CLIENT_MAX = 200
+
+
+def set_client_log_sink(fn):
+    global _client_log_sink
+    _client_log_sink = fn
+
+
+def client_log(message):
+    sink = _client_log_sink
+    if sink is not None:
+        try:
+            sink(message)
+            return
+        except Exception:
+            pass
+    if sys.stderr:
+        try:
+            sys.stderr.write("[页面] %s\n" % message)
+            sys.stderr.flush()
+        except Exception:
+            pass
+
+
+def _prune_ui_clients(now):
+    """清掉很久没心跳的页面。调用方必须已经持有 _ui_lock。"""
+    for cid, (beat, _page, _visible) in list(_ui_clients.items()):
+        if now - beat > _UI_CLIENT_TTL:
+            _ui_clients.pop(cid, None)
+
+
+def ui_beat(client_id, page, visible):
+    """记一次心跳。返回 None / ('connect', 页面) / ('page', 旧页, 新页)。"""
+    # 这些都是页面传上来的，压成一行再进日志，免得伪造出额外的日志行
+    client_id = (client_id or "anonymous").replace("\r", " ").replace("\n", " ")[:64]
+    page = (page or "/").replace("\r", " ").replace("\n", " ")[:200]
+    now = time.time()
+    event = None
+    with _ui_lock:
+        old = _ui_clients.get(client_id)
+        if old is None:
+            if len(_ui_clients) >= _UI_CLIENT_MAX:
+                oldest = min(_ui_clients.items(), key=lambda kv: kv[1][0])[0]
+                _ui_clients.pop(oldest, None)
+            event = ("connect", page)
+        elif old[1] != page:
+            event = ("page", old[1], page)
+        _ui_clients[client_id] = (now, page, bool(visible))
+        _prune_ui_clients(now)
+    return event
+
+
+def ui_latest():
+    """最近还有心跳的那个页面，供看门狗判断「界面是不是还活着」。"""
+    now = time.time()
+    with _ui_lock:
+        _prune_ui_clients(now)
+        if not _ui_clients:
+            return None
+        cid, (beat, page, visible) = max(
+            _ui_clients.items(), key=lambda kv: kv[1][0])
+        return {"id": cid, "beat": beat, "page": page, "visible": visible}
 
 
 # --------------------------------------------------------------------------
@@ -189,9 +268,59 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._send_text("404 Not Found", 404)
 
+    # ---------------- 页面探针 ----------------
+
+    MAX_CLIENT_TEXT = 1000
+
+    def _client_endpoint(self, action):
+        raw = self._read_body()
+        if raw is None:
+            return self._send_json({"ok": False, "error": "请求体太大"}, 413)
+
+        data = {}
+        if raw:
+            try:
+                decoded = json.loads(raw.decode("utf-8"))
+                if isinstance(decoded, dict):
+                    data = decoded
+            except (ValueError, UnicodeDecodeError):
+                pass
+
+        if action == "heartbeat":
+            client_id = str(data.get("id") or "anonymous")
+            page = str(data.get("page") or "/")
+            visible = data.get("visible", True) is not False
+            event = ui_beat(client_id, page, visible)
+            if event and event[0] == "connect":
+                client_log("页面已连接: %s" % event[1])
+            elif event:
+                client_log("页面切换: %s → %s" % (event[1], event[2]))
+            return self._send_json({"ok": True})
+
+        if action == "log":
+            text = str(data.get("message") or "")
+            # app.log 是按行读的，堆栈里的换行压成一行，免得一条记录拆成几十行
+            text = text.replace("\r", " ").replace("\n", " | ").strip()
+            if not text:
+                return self._send_json({"ok": True})
+            if len(text) > self.MAX_CLIENT_TEXT:
+                text = text[:self.MAX_CLIENT_TEXT] + " …"
+            level = str(data.get("level") or "error")[:16]
+            page = (str(data.get("page") or "")
+                    .replace("\r", " ").replace("\n", " ")[:200])
+            client_log("页面报错[%s]%s: %s" % (
+                level, (" " + page) if page else "", text))
+            return self._send_json({"ok": True})
+
+        return self._send_text("404 Not Found", 404)
+
     def do_POST(self):
         parsed_url = urlparse(self.path)
         parts = [p for p in parsed_url.path.split("/") if p]
+
+        # 页面自身的探针，不属于任何工具，所以要在按 tool_id 分发之前接走。
+        if parts[:2] == ["api", "client"] and len(parts) == 3:
+            return self._client_endpoint(parts[2])
 
         if parts[:1] != ["api"] or len(parts) < 3:
             self.close_connection = True      # body 没读，这条连接不能再复用

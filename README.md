@@ -161,6 +161,35 @@ ADB-Tool-Studio/
 日志在 `<可写数据目录>\logs\app.log`。桌面版没有控制台，**启动失败第一件事就是看它**，
 日志超过 512KB 会轮转成 `app.log.1`。
 
+### 白屏 / 页面没反应时看什么
+
+页面每 10 秒给后端发一次心跳，JS 报错也会上报，这些都写进同一份 `app.log`：
+
+| 日志 | 意思 |
+|---|---|
+| `页面已连接: /scripts` | 页面加载完成、心跳通了 |
+| `页面报错[error] /scripts: …` | 页面里的 JS 异常，带文件和行号；最多记 20 条，同样的错 10 秒内只记一次 |
+| `页面心跳中断: /scripts 已 120 秒没有心跳（可能白屏 / 渲染进程退出 / 刚从休眠唤醒）` | 页面不再运行了。之后的 `页面心跳恢复` 会记中断了多久 |
+
+「缩在托盘里」时 Chromium 会把定时器压到约每分钟一次，所以阈值是 120 秒；
+如果日志里这句话后面写的是「最后状态是后台」，先确认是不是只是最小化了。
+
+想直接看页面内部，用调试模式启动：
+
+```bat
+.venv-build\Scripts\python.exe desktop\app.py --force --debug
+```
+
+或者给 `dev.bat` 设个环境变量（`dev.bat` 本身不转发参数）：
+
+```bat
+set ATS_DEBUG=1
+dev.bat
+```
+
+`--debug` / `ATS_DEBUG=1` 会打开 WebView2 开发者工具，窗口里右键 → 检查，
+或按 `Ctrl+Shift+I`。白屏但进程还在时，通常还能连上去看 Console。
+
 ## 两个必须知道的前提
 
 - **WebView2 运行时**：pywebview 在 Windows 上靠 Edge 的 WebView2，Win11 和装了 Edge 的 Win10 都自带。
@@ -408,6 +437,8 @@ adb -s <序列号> shell "reboot"
 | POST | `/api/<id>/config` | 更新配置，按补丁合并，字段范围夹紧后落盘 |
 | POST | `/api/<id>/preview` | 只返回命令行预览，不执行（隧道） |
 | POST | `/api/<id>/logs/clear` | 清空服务端日志历史 |
+| POST | `/api/client/heartbeat` | 页面每 10 秒一次的心跳，用于检测白屏 / 渲染进程退出 |
+| POST | `/api/client/log` | 页面里的 JS 报错上报，写进桌面版的 `app.log` |
 | POST | `/api/script_runner/scripts/import?name=` | 导入脚本，body 是原始字节（上限 2 MB） |
 | POST | `/api/script_runner/scripts/rename` | 脚本改名 |
 | POST | `/api/script_runner/scripts/delete` | 删除脚本（执行中返回 409） |

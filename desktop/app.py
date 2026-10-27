@@ -169,10 +169,16 @@ class PageApi(object):
 
 class DesktopApp(object):
 
-    def __init__(self, host, port, minimized):
+    # 页面每 10 秒来一次心跳。缩在托盘/最小化时 Chromium 会把定时器压到
+    # 大约每分钟一次，所以阈值不能贴着 10 秒，否则天天误报。
+    UI_BEAT_TIMEOUT = 120
+    UI_BEAT_POLL = 5
+
+    def __init__(self, host, port, minimized, debug=False):
         self.host = host
         self.port = port
         self.start_minimized = minimized
+        self.debug = debug
         self.httpd = None
         self.window = None
         self.tray = Tray(self)
@@ -181,6 +187,44 @@ class DesktopApp(object):
 
     def log(self, message):
         log(message)
+
+    def _watch_ui(self):
+        """页面心跳停了就记一笔 —— 白屏时这是唯一能留下时间点的地方。
+
+        只看最近还有心跳的那个页面：同一个标签页换页不会换 id，所以正常
+        导航不会误报；开着的另一个标签页还在跳时，也不会因为旧的退出了就报警。
+        """
+        last_id = None
+        last_beat = None
+        alarm = False
+        while not self._quitting:
+            time.sleep(self.UI_BEAT_POLL)
+            cur = webapp.ui_latest()
+            if cur is None:               # 还没加载过页面（比如启动就缩托盘）
+                continue
+            cid, beat = cur["id"], cur["beat"]
+            if cid != last_id:            # 换了一个页面会话，重新开始算
+                last_id, last_beat, alarm = cid, beat, False
+                continue
+            if beat != last_beat:
+                if alarm:
+                    self.log("页面心跳恢复: %s（中断约 %d 秒）"
+                             % (cur["page"] or "?", int(time.time() - beat)))
+                    alarm = False
+                last_beat = beat
+                continue
+            if alarm or time.time() - beat < self.UI_BEAT_TIMEOUT:
+                continue
+            alarm = True
+            gap = int(time.time() - beat)
+            if cur["visible"]:
+                self.log("页面心跳中断: %s 已 %d 秒没有心跳"
+                         "（可能白屏 / 渲染进程退出 / 刚从休眠唤醒）"
+                         % (cur["page"] or "?", gap))
+            else:
+                self.log("页面心跳中断: %s 已 %d 秒没有心跳"
+                         "（最后状态是后台，可能只是缩在托盘里）"
+                         % (cur["page"] or "?", gap))
 
     # ---------------- 生命周期 ----------------
 
@@ -191,6 +235,11 @@ class DesktopApp(object):
         log("数据目录: %s" % apppaths.data_dir())
         log("资源目录: %s" % apppaths.resource_dir())
         log("打包模式: %s" % ("是" if apppaths.is_frozen() else "否（源码运行）"))
+
+        # 页面的心跳和 JS 报错都走这个 sink，落进同一份 app.log
+        webapp.set_client_log_sink(log)
+        threading.Thread(target=self._watch_ui, name="ui-watch",
+                         daemon=True).start()
 
         if self.tray.start():
             log("托盘已就绪")
@@ -236,7 +285,8 @@ class DesktopApp(object):
         except OSError:
             storage = None
 
-        start_args = {"private_mode": False}
+        debug = bool(self.debug) or os.environ.get("ATS_DEBUG") == "1"
+        start_args = {"private_mode": False, "debug": debug}
         if storage:
             start_args["storage_path"] = storage
         icon = apppaths.icon_path()
@@ -244,6 +294,8 @@ class DesktopApp(object):
             start_args["icon"] = icon
 
         log("打开窗口: %s" % self.httpd.url)
+        if debug:
+            log("调试模式已开启：窗口里右键 → 检查，或按 Ctrl+Shift+I")
         try:
             webview.start(**start_args)
         except Exception as exc:
@@ -357,6 +409,9 @@ def parse_args(argv=None):
                         help="启动后直接进托盘，不弹窗口（开机自启用的就是它）")
     parser.add_argument("--force", action="store_true",
                         help="跳过单实例检查（开发用：托盘里还挂着旧实例时）")
+    parser.add_argument("--debug", action="store_true",
+                        help="打开 WebView2 开发者工具"
+                             "（也可以设环境变量 ATS_DEBUG=1）")
     return parser.parse_args(argv)
 
 
@@ -372,7 +427,7 @@ def main(argv=None):
         return 0
 
     try:
-        return DesktopApp(args.host, args.port, args.minimized).run()
+        return DesktopApp(args.host, args.port, args.minimized, args.debug).run()
     except Exception as exc:
         log("启动失败: %r" % (exc,))
         log(traceback.format_exc())
