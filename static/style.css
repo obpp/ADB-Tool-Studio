@@ -1007,6 +1007,15 @@ input[data-tone="error"] { border-color: var(--critical); }
   padding: 6px 26px 44px;
 }
 
+/* 页脚：作者。和上面的 FAQ 之间用一条细线隔开，别再抢正文的注意力 */
+.help-footer {
+  margin-top: 36px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule-2);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
 .help-toc { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
 .help-toc a {
   padding: 3px 11px;

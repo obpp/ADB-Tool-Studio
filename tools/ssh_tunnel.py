@@ -3,7 +3,7 @@
 
 等价于这条命令：
 
-    ssh -R 5037:127.0.0.1:5037 -N zhangshijin2@10.27.12.198
+    ssh -R 5037:127.0.0.1:5037 -N user@host
 
 隧道建立后，在远程主机上直接敲 `adb devices` 就能看到接在本机的设备
 （远程的 adb 客户端默认就连 127.0.0.1:5037）。
@@ -110,6 +110,18 @@ def build_ssh_command(cfg):
     return cmd
 
 
+def display_command(cfg):
+    """给人看、给「复制」用的命令行。
+
+    主机还没填的时候把末尾的目标换成占位符 —— 否则预览里是一条
+    以空参数结尾的命令，复制出去还得自己看出哪里不对。
+    """
+    cmd = build_ssh_command(cfg)
+    if not cfg["host"]:
+        cmd[-1] = ("%s@host" % cfg["user"]) if cfg["user"] else "host"
+    return cmd
+
+
 class SshTunnelTool(Tool):
 
     id = "ssh_tunnel"
@@ -130,8 +142,10 @@ class SshTunnelTool(Tool):
     def default_config(self):
         return {
             "sshPath": resolve_ssh(),
-            "host": "10.27.12.198",
-            "user": "zhangshijin2",
+            # 主机和用户名不给默认值：填的是每个人的机器，写死一个就等于
+            # 跟着仓库和 exe 一起发出去。留空时页面会提示还没填。
+            "host": "",
+            "user": "",
             "sshPort": 22,
             "identityFile": "",
             "hostKeyPolicy": "accept-new",
@@ -201,7 +215,7 @@ class SshTunnelTool(Tool):
             "localSpec": self.local_spec(cfg),
             "target": ("%s@%s" % (cfg["user"], cfg["host"])) if cfg["user"] else cfg["host"],
             "connected": self.connected(),
-            "command": shell_join(build_ssh_command(cfg)),
+            "command": shell_join(display_command(cfg)),
             # 最近一次绑定失败的端口（页面据此把端口提示标红）
             "blockedPort": self._blocked_port,
         }
@@ -218,7 +232,7 @@ class SshTunnelTool(Tool):
     def preview(self, params):
         """POST /api/ssh_tunnel/preview：把页面上的当前参数变成一条命令行。"""
         merged = self.sanitize_config(params, base=self.config)
-        cmd = build_ssh_command(merged)
+        cmd = display_command(merged)
         warn = ""
         if not merged["host"]:
             warn = "还没有填远程主机"
@@ -244,6 +258,12 @@ class SshTunnelTool(Tool):
         self._blocked_port = None
         self._warned_ports = set()
         self._hinted_ports = set()
+
+        # 主机默认是空的，不拦一下的话 ssh 会甩一条 "usage" 之类的报错，
+        # 看不出是自己还没填
+        if not cfg["host"]:
+            self.log("err", "还没填远程主机，先在上面填上远程机器的 IP 或域名")
+            return
 
         while not self.stop_event.is_set():
             if delay:
