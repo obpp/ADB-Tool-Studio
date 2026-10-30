@@ -4,8 +4,9 @@
  *   侧边栏 = 两个通道的实时读数（灯 + 状态 + 时长）
  *   右侧   = 当前通道：铭牌 → 参数 | 日志
  *
- * 一条硬规则：颜色只用来表示状态。链接、按钮、焦点框全走墨色，
- * 页面上唯一的饱和色就是指示灯。强调色只出现在三处：链接、焦点、当前通道。
+ * 一条硬规则：颜色用来表示状态或类型，不用来装饰。链接、按钮、焦点框全走墨色，
+ * 页面上主要的饱和色是指示灯；只有两处例外：强调色（链接、焦点、当前通道），
+ * 和日志里命令行的蓝墨色（表示「这是一条命令」，不是状态）。
  *
  * 状态色固定，不随主题变；它们永远和文字一起出现，绝不只靠颜色表意。
  */
@@ -38,6 +39,10 @@
   --warn-ink: #8a5a00;
   --crit-ink: #b02828;
 
+  /* 日志里命令行的颜色。和 --accent 分开：那边是链接和焦点，
+   * 这里的对比度是单独按日志底色算的（浅色 5.8:1 / 深色 9.9:1）。 */
+  --cmd-ink: #0550ae;
+
   --radius: 3px;
   --sidebar-w: 240px;
 
@@ -62,6 +67,7 @@
     --good-ink: #4bd04b;
     --warn-ink: #f5c451;
     --crit-ink: #f0736f;
+    --cmd-ink: #79c0ff;
   }
 }
 
@@ -80,6 +86,7 @@
   --good-ink: #4bd04b;
   --warn-ink: #f5c451;
   --crit-ink: #f0736f;
+  --cmd-ink: #79c0ff;
 }
 
 /* ---------------------------------------------------------------- 基础 */
@@ -912,6 +919,11 @@ input[data-tone="error"] { border-color: var(--critical); }
 .line[data-level="warn"] .tag { color: var(--warn-ink); }
 .line[data-level="err"]  .tag { color: var(--crit-ink); }
 
+/* 命令行走蓝墨色 —— 终端里「这是要执行的命令」一直是这个约定。
+ * 它表达的是类型不是状态，所以不占状态色；日志里也没有链接，不会和 --accent 打架。 */
+.line[data-level="cmd"] .tag,
+.line[data-level="cmd"] .msg { color: var(--cmd-ink); }
+
 /* 只有出问题的行才加左侧色条 —— 平时保持安静 */
 .line[data-level="warn"] { border-left-color: var(--warning); }
 .line[data-level="err"]  { border-left-color: var(--critical); }
@@ -960,6 +972,152 @@ input[data-tone="error"] { border-color: var(--critical); }
 .line.is-hidden { display: none; }
 .log-hint { padding: 2px 8px; color: var(--ink-3); }
 
+/* ---------------------------------------------------------------- 使用说明 */
+
+/* 说明页只有一个滚动区，正文不进 .workspace 的两栏栅格 */
+.help-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 26px 44px;
+}
+
+.help-toc { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.help-toc a {
+  padding: 3px 11px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+.help-toc a:hover { background: var(--rule-2); color: var(--ink); }
+
+/* 中间隔着 #tool-docs，所以不能只写 .help-section + .help-section */
+.help-scroll > * + .help-section { margin-top: 36px; }
+
+.help-h2 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-3);
+  margin-bottom: 10px;
+}
+
+.help-note { margin: 0 0 12px; font-size: 12px; color: var(--ink-3); }
+
+/* 功能卡片：一行放得下几个就放几个，窄了自动换行 */
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+.feature-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: inherit;
+  text-decoration: none;
+}
+.feature-card:hover { border-color: var(--ink-3); background: var(--plane); }
+.fc-top { display: flex; align-items: center; gap: 8px; }
+.fc-icon { font-size: 15px; color: var(--ink-3); }
+.fc-name { font-size: 13px; font-weight: 500; color: var(--ink); }
+.fc-desc { font-size: 11.5px; line-height: 1.45; color: var(--ink-2); }
+
+/* 每个功能的速查：左边一列固定的小标题，右边是内容 */
+.tool-doc { margin-top: 30px; }
+.tool-doc-head { display: flex; align-items: center; gap: 10px; }
+.tool-doc-head h3 { font-size: 15px; }
+.doc-open { margin-left: auto; }
+
+.doc-row { display: flex; gap: 14px; margin-top: 9px; }
+.doc-key {
+  flex: none;
+  width: 72px;
+  padding-top: 1px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.doc-body { min-width: 0; margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+.doc-list { padding-left: 18px; }
+.doc-list li + li { margin-top: 3px; }
+
+/* 踩坑用黄三角打头，不用红 —— 红色留给真正会出事的操作 */
+.doc-warn { list-style: none; padding-left: 0; }
+.doc-warn li { position: relative; padding-left: 19px; }
+.doc-warn li::before {
+  content: '⚠';
+  position: absolute;
+  left: 0;
+  color: var(--warn-ink);
+}
+
+.doc-cmd {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--sunk);
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+  white-space: pre;
+  overflow-x: auto;
+}
+
+/* 通用设置：小卡片网格 */
+.help-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 12px;
+}
+.help-card {
+  padding: 12px 14px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.help-card-wide { grid-column: 1 / -1; }
+.help-card h3 { font-size: 12.5px; margin-bottom: 6px; color: var(--ink); }
+.help-card p, .help-card li { font-size: 12px; line-height: 1.55; color: var(--ink-2); }
+.help-card p { margin: 0; }
+.help-card ul { margin: 0; padding-left: 16px; }
+.help-card li + li { margin-top: 3px; }
+.help-card code { font-size: 11px; }
+.help-card .help-note { margin-top: 8px; }
+
+.help-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.help-table th, .help-table td {
+  padding: 5px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--rule-2);
+}
+.help-table th { font-size: 11.5px; font-weight: 500; color: var(--ink-3); }
+.help-table td { color: var(--ink-2); }
+.help-table tr:last-child td { border-bottom: none; }
+
+/* 常见问题：原生的折叠面板，不用自己写交互 */
+.faq-item {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.faq-item + .faq-item { margin-top: 8px; }
+.faq-item summary {
+  padding: 9px 13px;
+  font-size: 12.5px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.faq-item[open] summary { border-bottom: 1px solid var(--rule-2); }
+.faq-body { padding: 9px 13px 11px; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+.faq-body p { margin: 0 0 6px; }
+.faq-body p:last-child { margin-bottom: 0; }
+
 /* ---------------------------------------------------------------- 窄窗口 */
 
 /* 侧边栏收成图标条：只留灯 + 一个字形，名称走 title */
@@ -989,10 +1147,12 @@ input[data-tone="error"] { border-color: var(--critical); }
   .sidebar-actions { flex-direction: column; width: 100%; }
   .sidebar-actions .btn { padding: 7px 0; justify-content: center; font-size: 11px; }
   /* 图标条里放不下四个字，换成字形；完整说法留在 aria-label / title 上 */
-  #stop-all, #theme { font-size: 0; }
-  #stop-all::after, #theme::after { font-size: 12px; line-height: 1; }
+  #stop-all, #theme, #help { font-size: 0; }
+  #stop-all::after, #theme::after, #help::after { font-size: 12px; line-height: 1; }
   #stop-all::after { content: '■'; }
   #theme::after { content: '◐'; }
+  #help::after { content: '?'; }
+  .help-scroll { padding-left: 18px; padding-right: 18px; }
   .workspace { grid-template-columns: 300px minmax(0, 1fr); gap: 20px; padding: 16px 18px 20px; }
   .nameplate, .cmdbar { padding-left: 18px; padding-right: 18px; }
   .rule { margin: 0 18px; }
@@ -1005,6 +1165,9 @@ input[data-tone="error"] { border-color: var(--critical); }
   .pane-params { overflow: visible; }
   .pane-log { min-height: 340px; }
   .line .tag { width: auto; }
+  /* 速查的左栏竖过来，不然一行里塞不下 */
+  .doc-row { flex-direction: column; gap: 2px; }
+  .doc-key { width: auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

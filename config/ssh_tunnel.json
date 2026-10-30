@@ -12,5 +12,6 @@
   "localPort": 5037,
   "gatewayPorts": false,
   "autoReconnect": true,
-  "reconnectInterval": 3.0
+  "reconnectInterval": 3.0,
+  "envHintDismissed": false
 }
