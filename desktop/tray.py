@@ -58,6 +58,7 @@ class Tray(object):
 
         menu = pystray.Menu(
             pystray.MenuItem("显示主窗口", self._on_show, default=True),
+            pystray.MenuItem("重新加载页面", self._on_reload),
             pystray.MenuItem("全部停止", self._on_stop_all),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("开机自启", self._on_toggle_autostart,
@@ -99,6 +100,12 @@ class Tray(object):
 
     def _on_show(self, icon=None, item=None):
         self.app.show_window()
+
+    def _on_reload(self, icon=None, item=None):
+        # 画面白了的时候用这个：先叫出来，再让它重新导航
+        self.app.show_window()
+        if self.app.reload_page():
+            self.notify("页面已重新加载")
 
     def _on_stop_all(self, icon=None, item=None):
         count = self.app.stop_all_tools()
