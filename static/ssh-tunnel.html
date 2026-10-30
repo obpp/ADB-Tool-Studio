@@ -52,82 +52,83 @@
     <div class="workspace">
 
       <section class="pane pane-params">
+        <details class="group" open>
+          <summary class="pane-head">
+            <h2 class="pane-title">参数</h2>
+          </summary>
 
-        <div class="pane-head">
-          <h2 class="pane-title">参数</h2>
-        </div>
+          <form id="config-form" class="config-grid">
 
-        <form id="config-form" class="config-grid">
+            <label class="field span-2">
+              <span class="field-label">远程主机</span>
+              <input id="cfg-host" type="text" autocomplete="off" spellcheck="false">
+            </label>
 
-          <label class="field span-2">
-            <span class="field-label">远程主机</span>
-            <input id="cfg-host" type="text" autocomplete="off" spellcheck="false">
-          </label>
+            <label class="field">
+              <span class="field-label">SSH 用户名</span>
+              <input id="cfg-user" type="text" autocomplete="off" spellcheck="false">
+            </label>
 
-          <label class="field">
-            <span class="field-label">SSH 用户名</span>
-            <input id="cfg-user" type="text" autocomplete="off" spellcheck="false">
-          </label>
+            <label class="field">
+              <span class="field-label">SSH 端口</span>
+              <input id="cfg-sshport" type="number" min="1" max="65535" step="1">
+            </label>
 
-          <label class="field">
-            <span class="field-label">SSH 端口</span>
-            <input id="cfg-sshport" type="number" min="1" max="65535" step="1">
-          </label>
+            <label class="field span-2">
+              <span class="field-label">私钥文件</span>
+              <input id="cfg-identity" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="留空则用 ssh 默认密钥">
+            </label>
 
-          <label class="field span-2">
-            <span class="field-label">私钥文件</span>
-            <input id="cfg-identity" type="text" autocomplete="off" spellcheck="false"
-                   placeholder="留空则用 ssh 默认密钥">
-          </label>
+            <label class="field">
+              <span class="field-label">远程绑定端口</span>
+              <input id="cfg-remoteport" type="number" min="1" max="65535" step="1">
+            </label>
 
-          <label class="field">
-            <span class="field-label">远程绑定端口</span>
-            <input id="cfg-remoteport" type="number" min="1" max="65535" step="1">
-          </label>
+            <label class="field">
+              <span class="field-label">本地地址</span>
+              <input id="cfg-localhost" type="text" autocomplete="off" spellcheck="false">
+            </label>
 
-          <label class="field">
-            <span class="field-label">本地地址</span>
-            <input id="cfg-localhost" type="text" autocomplete="off" spellcheck="false">
-          </label>
+            <p id="port-hint" class="hint span-2" role="status" hidden></p>
 
-          <p id="port-hint" class="hint span-2" role="status" hidden></p>
+            <label class="field">
+              <span class="field-label">本地端口</span>
+              <input id="cfg-localport" type="number" min="1" max="65535" step="1">
+            </label>
 
-          <label class="field">
-            <span class="field-label">本地端口</span>
-            <input id="cfg-localport" type="number" min="1" max="65535" step="1">
-          </label>
+            <label class="field">
+              <span class="field-label">断线重连间隔（秒）</span>
+              <input id="cfg-reconnect" type="number" min="0.5" max="3600" step="0.5">
+            </label>
 
-          <label class="field">
-            <span class="field-label">断线重连间隔（秒）</span>
-            <input id="cfg-reconnect" type="number" min="0.5" max="3600" step="0.5">
-          </label>
+            <label class="field">
+              <span class="field-label">主机指纹校验</span>
+              <select id="cfg-hostkey">
+                <option value="accept-new">自动接受新的</option>
+                <option value="yes">严格校验</option>
+                <option value="no">不校验（不安全）</option>
+              </select>
+            </label>
 
-          <label class="field">
-            <span class="field-label">主机指纹校验</span>
-            <select id="cfg-hostkey">
-              <option value="accept-new">自动接受新的</option>
-              <option value="yes">严格校验</option>
-              <option value="no">不校验（不安全）</option>
-            </select>
-          </label>
+            <label class="field span-2">
+              <span class="field-label">ssh 可执行文件</span>
+              <input id="cfg-ssh" type="text" autocomplete="off" spellcheck="false">
+            </label>
 
-          <label class="field span-2">
-            <span class="field-label">ssh 可执行文件</span>
-            <input id="cfg-ssh" type="text" autocomplete="off" spellcheck="false">
-          </label>
+            <div class="field checks span-2">
+              <label class="check"><input id="cfg-autoreconnect" type="checkbox"> 断线自动重连</label>
+              <label class="check"><input id="cfg-keepalive" type="checkbox"> 发送心跳保活</label>
+              <label class="check"><input id="cfg-batchmode" type="checkbox"> 禁止交互式提问</label>
+              <label class="check"><input id="cfg-gateway" type="checkbox"> 绑定到 0.0.0.0（需远程开 GatewayPorts）</label>
+            </div>
 
-          <div class="field checks span-2">
-            <label class="check"><input id="cfg-autoreconnect" type="checkbox"> 断线自动重连</label>
-            <label class="check"><input id="cfg-keepalive" type="checkbox"> 发送心跳保活</label>
-            <label class="check"><input id="cfg-batchmode" type="checkbox"> 禁止交互式提问</label>
-            <label class="check"><input id="cfg-gateway" type="checkbox"> 绑定到 0.0.0.0（需远程开 GatewayPorts）</label>
-          </div>
-
-          <div class="form-actions span-2">
-            <button class="btn primary" type="submit">保存参数</button>
-            <span id="cfg-status" class="form-status" role="status"></span>
-          </div>
-        </form>
+            <div class="form-actions span-2">
+              <button class="btn primary" type="submit">保存参数</button>
+              <span id="cfg-status" class="form-status" role="status"></span>
+            </div>
+          </form>
+        </details>
 
       </section>
 

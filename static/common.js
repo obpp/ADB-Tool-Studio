@@ -377,6 +377,69 @@ window.ADB = (function () {
     this._refreshChips();
   };
 
+  /* ---------------- 参数区块开合 ----------------
+   * 左栏的每个区块都是 <details class="group">，开合本身由浏览器负责；
+   * 这里只补两件事：按页面记住哪些被收起来了，以及别让标题行里的按钮
+   * （刷新、导入…）顺手把整块收起来。
+   */
+  var GROUPS_KEY = 'ats-groups-closed';
+
+  // 区块用标题文字当键：标题不会变，也就不用给每块再加一个 id
+  function groupName(details) {
+    var title = details.querySelector('summary .pane-title');
+    return title ? title.textContent.trim() : '';
+  }
+
+  function readCollapsedGroups() {
+    try {
+      var all = JSON.parse(localStorage.getItem(GROUPS_KEY) || '{}');
+      var list = all && all[location.pathname];
+      return Object.prototype.toString.call(list) === '[object Array]' ? list : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function writeCollapsedGroups(groups) {
+    var names = [];
+    for (var i = 0; i < groups.length; i++) {
+      if (!groups[i].open) names.push(groupName(groups[i]));
+    }
+    try {
+      var all = JSON.parse(localStorage.getItem(GROUPS_KEY) || '{}');
+      if (!all || Object.prototype.toString.call(all) !== '[object Object]') all = {};
+      all[location.pathname] = names;
+      localStorage.setItem(GROUPS_KEY, JSON.stringify(all));
+    } catch (e) { /* 隐私模式：只是不记忆，开合照常 */ }
+  }
+
+  function initGroups() {
+    var groups = document.querySelectorAll('details.group');
+    if (!groups.length) return;
+    var closed = readCollapsedGroups();
+    for (var i = 0; i < groups.length; i++) {
+      if (closed.indexOf(groupName(groups[i])) >= 0) groups[i].open = false;
+      groups[i].addEventListener('toggle', function () {
+        writeCollapsedGroups(groups);
+      });
+    }
+  }
+
+  // 点在 summary 里的按钮/链接上时，拦下 <summary> 的默认开合动作，
+  // 但只在点确实落在 summary 内部时才拦 —— 页面别处的按钮不受影响。
+  document.addEventListener('click', function (ev) {
+    var node = ev.target;
+    var onControl = false;
+    while (node && node !== document) {
+      if (node.tagName === 'SUMMARY') {
+        if (onControl) ev.preventDefault();
+        return;
+      }
+      if (node.tagName === 'BUTTON' || node.tagName === 'A') onControl = true;
+      node = node.parentNode;
+    }
+  }, true);
+
   /* ---------------- 工具客户端 ---------------- */
 
   function ToolClient(id) {
@@ -572,6 +635,8 @@ window.ADB = (function () {
   heartbeat();
   setInterval(heartbeat, 10000);
   document.addEventListener('visibilitychange', heartbeat);
+
+  initGroups();
 
   return {
     $: $,

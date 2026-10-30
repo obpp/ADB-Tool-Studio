@@ -351,8 +351,8 @@ a { color: var(--accent); text-underline-offset: 2px; }
   margin: 0 0 10px;
 }
 .pane-head .pane-title { margin-bottom: 0; }
-/* 参数区里第二个区块（设备）跟上面隔开 */
-.pane-params > * + .pane-head { margin-top: 26px; }
+/* 参数区里相邻的两个区块之间隔开 */
+.pane-params > .group + .group { margin-top: 26px; }
 
 /* ---------------------------------------------------------------- 按钮 */
 
@@ -876,6 +876,31 @@ input[data-tone="error"] { border-color: var(--critical); }
 }
 .pane-head .pane-title { margin: 0; }
 .pane-tools { display: flex; align-items: center; gap: 10px; }
+
+/* 参数区块开合：整行标题就是开关，箭头在标题左边。
+ * 负的 margin 是为了让加了内边距的点击区仍然和下面的字段左对齐。 */
+.group > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 3px 6px;
+  margin: -3px -6px 10px;
+  border-radius: var(--radius);
+}
+.group > summary::-webkit-details-marker { display: none; }
+.group > summary:hover { background: var(--rule-2); }
+.group:not([open]) > summary { margin-bottom: 0; }
+
+.group > summary .pane-title::before {
+  content: '▾';
+  display: inline-block;
+  width: 12px;
+  margin-right: 4px;
+  font-size: 10px;
+  color: var(--ink-3);
+  transition: transform 0.12s ease;
+}
+/* 收起时三角转 90°：向下 = 展开，向左 = 收起 */
+.group:not([open]) > summary .pane-title::before { transform: rotate(90deg); }
 
 .log {
   flex: 1;
