@@ -76,6 +76,24 @@
             <input id="cfg-timeout" type="number" min="5" max="3600" step="1">
           </label>
 
+          <div class="field span-2">
+            <label class="check"><input id="cfg-loop" type="checkbox"> 循环执行</label>
+            <span class="loop-row" id="loop-row">
+              <span class="loop-opt">
+                <span class="field-label">间隔</span>
+                <input id="cfg-loop-interval" type="number" min="0" max="86400" step="1">
+                <span class="field-label">秒</span>
+              </span>
+              <span class="loop-opt">
+                <span class="field-label">次数</span>
+                <input id="cfg-loop-count" type="number" min="0" max="1000000" step="1">
+                <span class="field-label">（0 = 不限）</span>
+              </span>
+              <label class="check small"><input id="cfg-loop-stop-fail" type="checkbox"> 失败即停</label>
+            </span>
+            <span class="hint" id="loop-hint">每轮都重新推送并执行一次；不勾「失败即停」时某轮失败会照常进入下一轮。</span>
+          </div>
+
           <label class="field span-2 script-args">
             <span class="field-label">脚本参数</span>
             <input id="cfg-args" type="text" autocomplete="off" spellcheck="false" disabled

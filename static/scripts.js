@@ -48,7 +48,15 @@
     devices = extra.devices || devices;
 
     var override = null;
-    if (s.status === 'idle' && stats.lastExitCode) {
+    var loop = extra.loop || {};
+    if (s.status === 'running' && loop.active) {
+      // 循环跑着的时候最想知道的就是「第几轮了」
+      override = {
+        tone: 'running', icon: '▶',
+        text: '运行中 · 第 ' + (loop.round || 0) + ' 轮' +
+          (loop.total > 0 ? '/' + loop.total : '')
+      };
+    } else if (s.status === 'idle' && stats.lastExitCode) {
       override = { tone: 'error', icon: '⚠', text: '上次执行失败' };
     }
     ADB.paintBadge($('#badge'), s.status, override);
@@ -449,8 +457,29 @@
       adbPath: $('#cfg-adb').value.trim(),
       serial: $('#cfg-serial').value,
       remoteDir: $('#cfg-remote').value.trim(),
-      timeout: ADB.numberValue('#cfg-timeout', 60)
+      timeout: ADB.numberValue('#cfg-timeout', 60),
+      loop: !!$('#cfg-loop').checked,
+      loopInterval: ADB.numberValue('#cfg-loop-interval', 60),
+      loopCount: Math.round(ADB.numberValue('#cfg-loop-count', 0)),
+      loopStopOnFail: !!$('#cfg-loop-stop-fail').checked
     };
+  }
+
+  // 没勾「循环执行」时这组设置整块收起来，勾上才展开；收起期间也禁用，
+  // 免得 Tab 键摸到看不见的输入框
+  function syncLoopInputs() {
+    var on = !!$('#cfg-loop').checked;
+    var parts = ['#loop-row', '#loop-hint'];
+    for (var i = 0; i < parts.length; i++) {
+      var part = $(parts[i]);
+      if (part) part.classList.toggle('is-off', !on);
+    }
+    var fields = ['#cfg-loop-interval', '#cfg-loop-count', '#cfg-loop-stop-fail'];
+    for (var j = 0; j < fields.length; j++) {
+      var el = $(fields[j]);
+      if (el) el.disabled = !on;
+    }
+    $('#btn-run').textContent = on ? '开始循环执行' : '执行选中脚本';
   }
 
   function applyConfig(cfg, force) {
@@ -459,9 +488,17 @@
     $('#cfg-adb').value = cfg.adbPath || '';
     $('#cfg-remote').value = cfg.remoteDir || '';
     $('#cfg-timeout').value = cfg.timeout;
+    $('#cfg-loop').checked = !!cfg.loop;
+    $('#cfg-loop-interval').value = cfg.loopInterval;
+    $('#cfg-loop-count').value = cfg.loopCount;
+    $('#cfg-loop-stop-fail').checked = !!cfg.loopStopOnFail;
+    syncLoopInputs();
     fillSerialOptions(cfg.serial || '');
     cfgDirty = false;
   }
+
+  $('#cfg-loop').addEventListener('change', syncLoopInputs);
+  syncLoopInputs();
 
   // 脚本参数跟着选中的脚本存，不属于这份全局配置：打字时别把它算成配置改动，
   // 否则设备列表刷新会因为 cfgDirty 停下来

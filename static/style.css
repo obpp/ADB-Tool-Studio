@@ -446,6 +446,12 @@ input:focus-visible, select:focus-visible {
   border-color: var(--accent);
 }
 
+.loop-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.loop-row input[type="number"] { width: 82px; }
+.loop-opt { display: inline-flex; align-items: center; gap: 6px; }
+/* 没勾「循环执行」时整组设置直接收起来，勾上才展开 */
+.loop-row.is-off, .loop-hint.is-off { display: none; }
+
 .checks { display: flex; flex-direction: column; gap: 7px; }
 .check {
   display: inline-flex;
