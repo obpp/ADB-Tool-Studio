@@ -173,23 +173,29 @@ class DesktopApp(object):
     # 大约每分钟一次，所以阈值不能贴着 10 秒，否则天天误报。
     UI_BEAT_TIMEOUT = 120
     UI_BEAT_POLL = 5
+    UI_STALE_GAP = 90          # 窗口重新显示时，超过这么久没心跳就认为画面僵了
 
-    def __init__(self, host, port, minimized, debug=False):
+    def __init__(self, host, port, minimized, debug=False, remote_debug_port=0):
         self.host = host
         self.port = port
         self.start_minimized = minimized
         self.debug = debug
+        self.remote_debug_port = remote_debug_port
         self.httpd = None
         self.window = None
         self.tray = Tray(self)
         self._quitting = False
         self._told_about_tray = False
+        self._ui_stale = False       # 心跳断了，页面很可能已经白屏
+        self._auto_reloaded = False  # 本轮中断已经自动重载过，等新心跳再解锁
+        self._reload_lock = threading.Lock()
+        self._last_reload_check = 0
 
     def log(self, message):
         log(message)
 
     def _watch_ui(self):
-        """页面心跳停了就记一笔 —— 白屏时这是唯一能留下时间点的地方。
+        """页面心跳停了就记一笔，必要时把页面重新加载回来。
 
         只看最近还有心跳的那个页面：同一个标签页换页不会换 id，所以正常
         导航不会误报；开着的另一个标签页还在跳时，也不会因为旧的退出了就报警。
@@ -197,34 +203,109 @@ class DesktopApp(object):
         last_id = None
         last_beat = None
         alarm = False
+        prev_now = time.time()
         while not self._quitting:
             time.sleep(self.UI_BEAT_POLL)
+            now = time.time()
+
+            # 系统休眠时整个进程也停着；醒来后第一次循环的时间跳变很明显
+            if now - prev_now > max(30, self.UI_BEAT_POLL * 6):
+                self.log("检测到系统休眠 / 长时间挂起: 约 %d 秒没有运行"
+                         % int(now - prev_now))
+            prev_now = now
+
             cur = webapp.ui_latest()
             if cur is None:               # 还没加载过页面（比如启动就缩托盘）
                 continue
+
             cid, beat = cur["id"], cur["beat"]
             if cid != last_id:            # 换了一个页面会话，重新开始算
                 last_id, last_beat, alarm = cid, beat, False
+                self._ui_stale = False
+                self._auto_reloaded = False
                 continue
             if beat != last_beat:
                 if alarm:
                     self.log("页面心跳恢复: %s（中断约 %d 秒）"
-                             % (cur["page"] or "?", int(time.time() - beat)))
-                    alarm = False
+                             % (cur["page"] or "?", int(now - beat)))
+                alarm = False
+                self._ui_stale = False
+                self._auto_reloaded = False
                 last_beat = beat
                 continue
-            if alarm or time.time() - beat < self.UI_BEAT_TIMEOUT:
+            if alarm or now - beat < self.UI_BEAT_TIMEOUT:
                 continue
             alarm = True
-            gap = int(time.time() - beat)
+            self._ui_stale = True
+            gap = int(now - beat)
             if cur["visible"]:
                 self.log("页面心跳中断: %s 已 %d 秒没有心跳"
-                         "（可能白屏 / 渲染进程退出 / 刚从休眠唤醒）"
-                         % (cur["page"] or "?", gap))
+                         "（可能白屏 / 渲染进程退出 / 刚从休眠唤醒），"
+                         "正在重新加载页面" % (cur["page"] or "?", gap))
+                self.reload_page(auto=True)
             else:
                 self.log("页面心跳中断: %s 已 %d 秒没有心跳"
-                         "（最后状态是后台，可能只是缩在托盘里）"
-                         % (cur["page"] or "?", gap))
+                         "（最后状态是后台，可能只是缩在托盘里；"
+                         "重新显示窗口时会自动重载）" % (cur["page"] or "?", gap))
+
+    def reload_page(self, auto=False):
+        """把窗口导航回最后一次心跳所在页面。
+
+        白屏时页面自己已经没法执行 JS（location.reload 也叫不动），所以
+        走浏览器的 load_url 重新导航。auto=True 时每轮中断只自动试一次，
+        免得页面彻底起不来时反复刷新。
+        """
+        if self._quitting or self.window is None or self.httpd is None:
+            return False
+        with self._reload_lock:
+            if auto and self._auto_reloaded:
+                return False
+            cur = webapp.ui_latest()
+            page = (cur or {}).get("page") or "/"
+            if (not page.startswith("/") or len(page) > 200 or
+                    any(ch not in
+                        "abcdefghijklmnopqrstuvwxyz"
+                        "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/_-."
+                        for ch in page)):
+                page = "/"
+            target = self.httpd.url.rstrip("/") + page
+            try:
+                loader = getattr(self.window, "load_url", None)
+                if loader is not None:
+                    loader(target)
+                else:                     # 老版本 pywebview 的兜底
+                    self.window.evaluate_js("location.reload()")
+            except Exception as exc:
+                self.log("重新加载页面失败: %r" % (exc,))
+                return False
+            self._auto_reloaded = True
+            self._ui_stale = False
+            self.log("已重新加载页面: %s（%s）"
+                     % (page, "心跳中断" if auto else "手动"))
+            return True
+
+    def _reload_if_stale(self, delay):
+        """窗口重新显示时用：给页面两秒自己恢复，没恢复就重载。"""
+        if delay:
+            time.sleep(delay)
+        if self._quitting:
+            return
+        cur = webapp.ui_latest()
+        if cur is None:
+            return
+        if time.time() - cur["beat"] < self.UI_STALE_GAP:
+            return
+        self._ui_stale = True
+        self.reload_page(auto=True)
+
+    def _on_window_shown(self):
+        # shown / restored 可能连着来，几秒内只检查一次
+        now = time.time()
+        if now - self._last_reload_check < 3:
+            return
+        self._last_reload_check = now
+        threading.Thread(target=self._reload_if_stale, args=(2.0,),
+                         daemon=True).start()
 
     # ---------------- 生命周期 ----------------
 
@@ -233,6 +314,8 @@ class DesktopApp(object):
         self.httpd.start()
         log("服务已启动: %s" % self.httpd.url)
         log("数据目录: %s" % apppaths.data_dir())
+        log("日志目录: %s" % apppaths.logs_dir())
+        log("WebView 数据目录: %s" % apppaths.webview_dir())
         log("资源目录: %s" % apppaths.resource_dir())
         log("打包模式: %s" % ("是" if apppaths.is_frozen() else "否（源码运行）"))
 
@@ -260,6 +343,14 @@ class DesktopApp(object):
         if sys.platform == "win32" and not webview2_installed():
             return self._run_without_window("没检测到 WebView2 运行时")
 
+        # 白屏时窗口里的 DevTools 可能点不开，留一个外部调试口更可靠
+        if self.remote_debug_port:
+            try:
+                webview.settings["REMOTE_DEBUGGING_PORT"] = int(
+                    self.remote_debug_port)
+            except Exception as exc:
+                log("设置远程调试端口失败: %r" % (exc,))
+
         # 开机自启时不弹窗；但没有托盘的话缩进去就再也叫不出来了
         hidden = self.start_minimized and self.tray.available
 
@@ -278,8 +369,15 @@ class DesktopApp(object):
             return self._run_without_window("建窗口失败: %r" % (exc,))
 
         self.window.events.closing += self._on_closing
+        # 从托盘/最小化回来时，如果页面心跳已经断了，顺手重载一次
+        for name in ("shown", "restored"):
+            event = getattr(self.window.events, name, None)
+            if event is not None:
+                event += self._on_window_shown
 
-        storage = os.path.join(apppaths.data_dir(), "webview")
+        # WebView2 的用户数据必须在本机盘：exe 放在映射网络盘上时，
+        # 拔网线 / 网络一抖，渲染进程就会卡死白屏（见 apppaths.webview_dir）
+        storage = apppaths.webview_dir()
         try:
             os.makedirs(storage, exist_ok=True)
         except OSError:
@@ -296,6 +394,9 @@ class DesktopApp(object):
         log("打开窗口: %s" % self.httpd.url)
         if debug:
             log("调试模式已开启：窗口里右键 → 检查，或按 Ctrl+Shift+I")
+        if self.remote_debug_port:
+            log("远程调试端口已开启: http://127.0.0.1:%d"
+                % int(self.remote_debug_port))
         try:
             webview.start(**start_args)
         except Exception as exc:
@@ -364,6 +465,7 @@ class DesktopApp(object):
             self.window.restore()
         except Exception as exc:
             log("显示窗口失败: %r" % (exc,))
+        self._on_window_shown()
 
     def stop_all_tools(self):
         stopped = 0
@@ -412,6 +514,9 @@ def parse_args(argv=None):
     parser.add_argument("--debug", action="store_true",
                         help="打开 WebView2 开发者工具"
                              "（也可以设环境变量 ATS_DEBUG=1）")
+    parser.add_argument("--remote-debugging-port", type=int, default=0,
+                        help="另开一个 DevTools 调试端口（0 = 关闭）；"
+                             "白屏时用 Edge 打开 http://127.0.0.1:<端口>")
     return parser.parse_args(argv)
 
 
@@ -427,7 +532,8 @@ def main(argv=None):
         return 0
 
     try:
-        return DesktopApp(args.host, args.port, args.minimized, args.debug).run()
+        return DesktopApp(args.host, args.port, args.minimized, args.debug,
+                          args.remote_debugging_port).run()
     except Exception as exc:
         log("启动失败: %r" % (exc,))
         log(traceback.format_exc())
