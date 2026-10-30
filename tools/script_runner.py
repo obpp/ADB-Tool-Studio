@@ -29,7 +29,7 @@ import time
 
 import adbkit
 import spawn
-from toolbase import Tool, as_num, as_str, shell_join
+from toolbase import Tool, as_bool, as_int, as_num, as_str, shell_join
 
 # 导入脚本的大小上限。脚本是文本，几 MB 已经离谱了。
 MAX_SCRIPT_BYTES = 2 * 1024 * 1024
@@ -167,6 +167,14 @@ def human_size(n):
     return "%.1f MB" % (n / (1024.0 * 1024.0))
 
 
+def _seconds_text(seconds):
+    """60.0 -> 60，0.5 -> 0.5。日志里别显示无意义的小数。"""
+    seconds = float(seconds)
+    if seconds == int(seconds):
+        return str(int(seconds))
+    return "%.1f" % seconds
+
+
 class ScriptRunnerTool(Tool):
 
     id = "script_runner"
@@ -180,6 +188,9 @@ class ScriptRunnerTool(Tool):
         self.devices = []
         self.devices_error = ""
         self._running_id = ""      # 正在执行的脚本 id，空 = 没有
+        self._loop_round = 0       # 循环执行：当前 / 刚跑完的一轮
+        self._loop_total = 0       # 0 = 不限次数
+        self._looping = False      # 正在按循环跑（配置中途改了也不影响这一轮）
         Tool.__init__(self, app_dir)
         self._load_scripts()
 
@@ -200,6 +211,12 @@ class ScriptRunnerTool(Tool):
             "remoteDir": "/data/local/tmp",
             "timeout": 60.0,
             "selected": "",
+            # 循环执行：默认关；开启后按间隔重复跑，0 次表示一直跑到手动停止。
+            # 失败默认继续，老化/压测不会被一次偶发失败整个打断。
+            "loop": False,
+            "loopInterval": 60.0,
+            "loopCount": 0,
+            "loopStopOnFail": False,
         }
 
     def sanitize_config(self, raw, base=None):
@@ -219,6 +236,12 @@ class ScriptRunnerTool(Tool):
             # 没有超时这个后台线程就永久挂住了。
             "timeout": as_num(raw, "timeout", base["timeout"], 5.0, 3600.0),
             "selected": as_str(raw, "selected", base["selected"]),
+            "loop": as_bool(raw, "loop", base["loop"]),
+            # 0 秒 = 上一轮结束就接着跑；上限一天，够覆盖各种老化测试
+            "loopInterval": as_num(raw, "loopInterval", base["loopInterval"],
+                                   0.0, 86400.0),
+            "loopCount": as_int(raw, "loopCount", base["loopCount"], 0, 1000000),
+            "loopStopOnFail": as_bool(raw, "loopStopOnFail", base["loopStopOnFail"]),
         }
 
     def default_stats(self):
@@ -347,6 +370,11 @@ class ScriptRunnerTool(Tool):
             scripts = [dict(s) for s in self.scripts]
             selected = self.config.get("selected", "")
             running_id = self._running_id
+            loop = {
+                "active": self._looping and self.is_alive(),
+                "round": self._loop_round,
+                "total": self._loop_total,
+            }
         if selected and not any(s["id"] == selected for s in scripts):
             selected = scripts[0]["id"] if scripts else ""
         return {
@@ -356,6 +384,7 @@ class ScriptRunnerTool(Tool):
             "devices": list(self.devices),
             "devicesError": self.devices_error,
             "remoteDir": self.config.get("remoteDir", ""),
+            "loop": loop,
         }
 
     def brief(self):
@@ -559,17 +588,72 @@ class ScriptRunnerTool(Tool):
             sid = str(options.get("scriptId") or self.config.get("selected") or "")
             with self.lock:
                 self._set_args(sid, text)
+        with self.lock:
+            self._loop_round = 0
+            self._loop_total = 0
         return Tool.start(self, options)
 
     def run_loop(self):
         cfg = dict(self.config)
         sid = str(self.start_options.get("scriptId") or cfg.get("selected") or "")
 
+        looping = bool(cfg.get("loop"))
+        interval = cfg.get("loopInterval", 0.0)
+        limit = cfg.get("loopCount", 0) if looping else 0
+        stop_on_fail = bool(cfg.get("loopStopOnFail"))
+        round_no = 0
+
+        # 没有可执行的脚本是配置问题，不是「这一轮失败」：循环起来只会
+        # 每轮刷一遍同样的报错，先在这儿拦下。
+        if looping and self._find(sid) is None:
+            self.log("err", "没有可执行的脚本，先在左边导入一个")
+            return
+
+        with self.lock:
+            self._looping = looping
+        try:
+            while not self.stop_event.is_set():
+                round_no += 1
+                with self.lock:
+                    self._loop_round = round_no
+                    self._loop_total = limit
+                self.publish_state()
+
+                if looping:
+                    self.log("info", "=== 第 %d 轮%s ===" % (
+                        round_no, ("/%d" % limit) if limit else ""))
+
+                outcome = self._run_once(cfg, sid)
+
+                if self.stop_event.is_set():
+                    if looping:
+                        self.log("info", "循环已停止，共完成 %d 轮" % round_no)
+                    return
+                if not looping:
+                    return
+                if limit and round_no >= limit:
+                    self.log("info", "已跑满 %d 轮，循环结束" % limit)
+                    return
+                if outcome == "fail" and stop_on_fail:
+                    self.log("warn", "本轮失败，按设置停止循环")
+                    return
+                if interval > 0:
+                    self.log("info", "等待 %s 秒后开始第 %d 轮"
+                             % (_seconds_text(interval), round_no + 1))
+                    if self.stop_event.wait(interval):
+                        self.log("info", "循环已停止，共完成 %d 轮" % round_no)
+                        return
+        finally:
+            with self.lock:
+                self._looping = False
+
+    def _run_once(self, cfg, sid):
+        """跑一轮。返回 ok / fail / stopped，循环按这个决定要不要继续。"""
         with self.lock:
             entry = self._find(sid)
             if entry is None:
                 self.log("err", "没有可执行的脚本，先在左边导入一个")
-                return
+                return "fail"
             script_path = os.path.join(self.script_dir(), entry["file"])
             script_name = entry["name"]
             remote_name = self._remote_name(entry)
@@ -582,20 +666,20 @@ class ScriptRunnerTool(Tool):
         try:
             if not os.path.isfile(script_path):
                 self.log("err", "脚本文件不见了: %s" % script_path)
-                return
+                return outcome
 
             # 参数先拆好：写错了就别推到设备上白跑一趟
             try:
                 argv = split_args(args_text)
             except ValueError as exc:
                 self.log("err", "参数写错了: %s" % exc)
-                return
+                return outcome
 
             devices, _ = self.refresh_devices()
             serial, err = self._pick_serial(devices)
             if not serial:
                 self.log("err", err)
-                return
+                return outcome
             self.log("info", "执行 %s · 目标设备 %s" % (script_name, serial))
 
             remote = cfg["remoteDir"].rstrip("/") + "/" + remote_name
@@ -608,14 +692,15 @@ class ScriptRunnerTool(Tool):
                 self.log("info", text)
             if adbkit.problem(push_rc, push_out) is not None:
                 self.log("err", "推送失败，脚本没有执行")
-                return
+                return outcome
             if self.stop_event.is_set():
                 self.log("warn", "已停止（推送完成，脚本未执行）")
                 outcome = "stopped"
-                return
+                return outcome
             self.log("ok", "已推送到 %s" % remote)
 
             rc, outcome = self._shell(cfg, serial, remote, argv)
+            return outcome
 
         finally:
             elapsed = time.time() - started

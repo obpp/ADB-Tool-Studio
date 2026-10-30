@@ -50,61 +50,64 @@
     <div class="workspace">
 
       <section class="pane pane-params">
+        <details class="group" open>
+          <summary class="pane-head">
+            <h2 class="pane-title">参数</h2>
+          </summary>
 
-        <div class="pane-head">
-          <h2 class="pane-title">参数</h2>
-        </div>
+          <form id="config-form" class="config-grid">
+            <label class="field span-2">
+              <span class="field-label">adb 路径</span>
+              <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
+            </label>
 
-        <form id="config-form" class="config-grid">
-          <label class="field span-2">
-            <span class="field-label">adb 路径</span>
-            <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
-          </label>
+            <label class="field">
+              <span class="field-label">目标设备</span>
+              <select id="cfg-serial"></select>
+            </label>
 
-          <label class="field">
-            <span class="field-label">目标设备</span>
-            <select id="cfg-serial"></select>
-          </label>
+            <label class="field">
+              <span class="field-label">写入值</span>
+              <input id="cfg-value" type="text" inputmode="numeric" autocomplete="off">
+            </label>
 
-          <label class="field">
-            <span class="field-label">写入值</span>
-            <input id="cfg-value" type="text" inputmode="numeric" autocomplete="off">
-          </label>
+            <label class="field">
+              <span class="field-label">失败重试间隔（秒）</span>
+              <input id="cfg-retry" type="number" min="0.1" max="600" step="0.1">
+            </label>
 
-          <label class="field">
-            <span class="field-label">失败重试间隔（秒）</span>
-            <input id="cfg-retry" type="number" min="0.1" max="600" step="0.1">
-          </label>
+            <label class="field">
+              <span class="field-label">每轮成功后等待（秒）</span>
+              <input id="cfg-wait" type="number" min="0" max="86400" step="1">
+            </label>
 
-          <label class="field">
-            <span class="field-label">每轮成功后等待（秒）</span>
-            <input id="cfg-wait" type="number" min="0" max="86400" step="1">
-          </label>
+            <label class="field">
+              <span class="field-label">单条命令超时（秒）</span>
+              <input id="cfg-timeout" type="number" min="1" max="3600" step="1">
+            </label>
 
-          <label class="field">
-            <span class="field-label">单条命令超时（秒）</span>
-            <input id="cfg-timeout" type="number" min="1" max="3600" step="1">
-          </label>
+            <div class="field checks span-2">
+              <label class="check"><input id="cfg-doroot" type="checkbox"> 执行 <code>adb root</code></label>
+              <label class="check"><input id="cfg-dosync" type="checkbox"> 执行 <code>adb shell sync</code></label>
+              <label class="check"><input id="cfg-waitroot" type="checkbox"> root 后等待设备重新上线</label>
+            </div>
 
-          <div class="field checks span-2">
-            <label class="check"><input id="cfg-doroot" type="checkbox"> 执行 <code>adb root</code></label>
-            <label class="check"><input id="cfg-dosync" type="checkbox"> 执行 <code>adb shell sync</code></label>
-            <label class="check"><input id="cfg-waitroot" type="checkbox"> root 后等待设备重新上线</label>
-          </div>
+            <div class="form-actions span-2">
+              <button class="btn primary" type="submit">保存参数</button>
+              <span id="cfg-status" class="form-status" role="status"></span>
+            </div>
+          </form>
+        </details>
 
-          <div class="form-actions span-2">
-            <button class="btn primary" type="submit">保存参数</button>
-            <span id="cfg-status" class="form-status" role="status"></span>
-          </div>
-        </form>
-
-        <div class="pane-head">
-          <h2 class="pane-title">设备</h2>
-          <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
-        </div>
-        <ul id="device-list" class="devices" aria-label="已连接的设备">
-          <li class="dev-empty">加载中…</li>
-        </ul>
+        <details class="group" open>
+          <summary class="pane-head">
+            <h2 class="pane-title">设备</h2>
+            <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
+          </summary>
+          <ul id="device-list" class="devices" aria-label="已连接的设备">
+            <li class="dev-empty">加载中…</li>
+          </ul>
+        </details>
 
       </section>
 

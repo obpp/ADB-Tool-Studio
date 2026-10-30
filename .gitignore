@@ -9,3 +9,6 @@ config/script_runner.scripts.json
 # 运行时数据：镜像预设（镜像本身不复制，这里只有路径）
 config/replace_image.json
 config/replace_image.presets.json
+
+# 运行时数据：隧道里填过的远程主机和用户名，每台机器不一样
+config/ssh_tunnel.json

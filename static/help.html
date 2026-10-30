@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用说明 · ADB Tool Studio</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-tool="help">
+
+<div class="app">
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+
+    <header class="nameplate">
+      <div class="nameplate-top">
+        <h1>使用说明</h1>
+      </div>
+      <p class="nameplate-desc">
+        一个 adb 小工具合集。网页版用浏览器打开，桌面版是一个常驻托盘的程序，
+        两边跑的是同一份后端。下面按功能逐个写「什么时候用、怎么用、容易踩什么坑、等价命令」，
+        页面上的输入框和按钮不重复解释。
+      </p>
+      <nav class="help-toc" aria-label="本页目录">
+        <a href="#features">全部功能</a>
+        <a href="#common">通用设置</a>
+        <a href="#faq">常见问题</a>
+      </nav>
+    </header>
+
+    <div class="rule"></div>
+
+    <div class="help-scroll">
+
+      <section class="help-section" id="features">
+        <h2 class="help-h2">全部功能</h2>
+        <p class="help-note">点卡片直接进对应页面；每个功能的速查紧跟在卡片下面。</p>
+        <div class="feature-grid" id="feature-grid"></div>
+      </section>
+
+      <div id="tool-docs"></div>
+
+      <section class="help-section" id="common">
+        <h2 class="help-h2">通用设置</h2>
+
+        <div class="help-grid">
+
+          <article class="help-card">
+            <h3>日志过滤</h3>
+            <p>每个页面的日志框上方有一排按钮：<code>全部</code> 加上 命令 / 信息 / 成功 / 警告 / 失败，
+              后面是这一类的条数。点一下隐藏这一类，再点恢复。</p>
+            <ul>
+              <li>只切显示，不删日志；关掉期间新来的同类日志也隐藏，但计数照加</li>
+              <li>选择存在浏览器里，换页面、重开窗口都沿用</li>
+              <li>一类都不剩时会提示「没有符合当前过滤条件的日志」，不是卡住了</li>
+            </ul>
+          </article>
+
+          <article class="help-card">
+            <h3>两个状态灯</h3>
+            <p>侧边栏底部两行互不代表：</p>
+            <ul>
+              <li><strong>服务</strong>：页面和本地后端通不通，每 3 秒问一次 <code>/api/tools</code></li>
+              <li><strong>设备</strong>：当前功能看到的 adb 设备。后端常驻 <code>wait-for-device</code>，
+                上线、掉线即时推送</li>
+              <li>ssh 隧道这类不碰 adb 的页面不显示「设备」那行</li>
+            </ul>
+          </article>
+
+          <article class="help-card">
+            <h3>全部停止 / 深色</h3>
+            <p><strong>全部停止</strong>一次掐掉所有功能的后台任务（ssh 隧道、正在跑的脚本都算）。
+              <strong>深色</strong>在浅色/深色之间切换，没手动选过时跟系统走。</p>
+          </article>
+
+          <article class="help-card">
+            <h3>循环执行怎么停</h3>
+            <p>脚本执行的循环，点「停止」会立刻打断正在执行的那一轮，或者轮与轮之间的等待；
+              已经结束的轮次不会被回滚。</p>
+          </article>
+
+          <article class="help-card">
+            <h3>桌面版多出来的东西</h3>
+            <ul>
+              <li>点 × 关窗口只是收进<strong>托盘</strong>，后台任务继续跑；真退出要右键托盘「退出」</li>
+              <li>托盘里可以勾<strong>开机自启</strong>，也可以「重新加载页面」</li>
+              <li>只允许开一个实例；端口是系统随机分的，不会撞</li>
+            </ul>
+          </article>
+
+          <article class="help-card">
+            <h3>日志在哪</h3>
+            <p>桌面版没有控制台，出问题先看日志：</p>
+            <ul>
+              <li>exe 旁边 <code>logs\app.log</code>；写不进去时在
+                <code>%APPDATA%\ADB-Tool-Studio\logs\</code></li>
+              <li>exe 放在映射网络盘上时，日志和 WebView 缓存都会改用
+                <code>%LOCALAPPDATA%\ADB-Tool-Studio\</code></li>
+              <li>超过 512KB 轮转成 <code>app.log.1</code></li>
+            </ul>
+          </article>
+
+          <article class="help-card help-card-wide">
+            <h3>网页版还是桌面版</h3>
+            <table class="help-table">
+              <thead>
+                <tr><th></th><th>网页版</th><th>桌面版</th></tr>
+              </thead>
+              <tbody>
+                <tr><td>怎么开</td><td><code>python3 server.py</code>，自己开浏览器</td><td>双击 exe</td></tr>
+                <tr><td>端口</td><td>固定 8765，被占就起不来</td><td>系统随机分配</td></tr>
+                <tr><td>关掉之后</td><td>服务跟着没了</td><td>缩进托盘继续跑</td></tr>
+                <tr><td>开机自启</td><td>得自己写计划任务</td><td>托盘里勾一下</td></tr>
+                <tr><td>同时开两个</td><td>可以，各跑各的</td><td>拦住，只留一个</td></tr>
+              </tbody>
+            </table>
+            <p class="help-note">两个版本共用同一份后端和页面，功能完全一样。</p>
+          </article>
+
+        </div>
+      </section>
+
+      <section class="help-section" id="faq">
+        <h2 class="help-h2">常见问题</h2>
+
+        <details class="faq-item">
+          <summary>设备一直出不来，或者显示「未授权」</summary>
+          <div class="faq-body">
+            <p>先在命令行敲一次 <code>adb devices</code>，看设备在不在、状态是不是 <code>device</code>。</p>
+            <p>常见原因：手机上没打开 USB 调试；插上后手机弹的「允许调试」没点；多台设备同时接着，
+              这里需要自己选序列号（不选时只有「恰好一台在线」才会自动选）。</p>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary>脚本一跑就报 <code>: not found</code></summary>
+          <div class="faq-body">
+            <p>导入时已经自动把 CRLF 换成 LF，所以多半不是换行符的问题，而是脚本里用了设备上没有的东西：
+              板子上是 toybox 的 sh，没有 bash 语法（<code>[[ ]]</code>、数组、<code>source</code>），
+              也没有常用的 GNU 工具。</p>
+            <p>把脚本开头的 <code>#!/bin/bash</code> 改成 <code>#!/system/bin/sh</code>，或者先手动
+              <code>adb shell sh 脚本</code> 跑一遍看报错。</p>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary>反向隧道报 remote port forwarding failed</summary>
+          <div class="faq-body">
+            <p>远程主机上的那个端口已经被别人占了（很常见：远端自己也有 adb server 在听 5037）。
+              把「远程绑定端口」改一个值，然后在远程主机的 <code>~/.bashrc</code> 里加：</p>
+            <p><code>export ANDROID_ADB_SERVER_PORT=&lt;新的远程绑定端口&gt;</code></p>
+            <p>如果是勾了「绑定到 0.0.0.0」才失败，还要确认远端 sshd 开了 <code>GatewayPorts</code>。</p>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary>页面白屏 / 点什么都没反应</summary>
+          <div class="faq-body">
+            <p>页面每 10 秒给后端发一次心跳、JS 报错也会上报，这些都写进 <code>app.log</code>：
+              「页面心跳中断」说明页面已经跑不动了，不是接口慢。</p>
+            <p>桌面版在窗口重新显示、且心跳已经停超过 90 秒时会自动重新加载页面（合盖休眠、拔网线
+              再回来都属于这种情况），托盘右键也能手动来一次。</p>
+            <p>如果 exe 是从映射网络盘（比如 <code>Z:</code>）启动的，先把它拷到本机盘再运行 ——
+              网络一断，WebView2 的缓存跟着掉，画面就会白掉。</p>
+          </div>
+        </details>
+
+        <details class="faq-item">
+          <summary>exe 被杀毒软件拦下 / 报毒</summary>
+          <div class="faq-body">
+            <p>PyInstaller 打出来的单文件 exe 被误报是常事。可以加白名单，或者用
+              <code>build.bat dir</code> 打成文件夹模式，体积更小、启动更快、误报也少。</p>
+          </div>
+        </details>
+
+      </section>
+
+      <footer class="help-footer">
+        作者：<a href="mailto:zhangshijin@cviauto.com">zhangshijin@cviauto.com</a>
+      </footer>
+
+    </div>
+  </main>
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/shell.js"></script>
+<script src="/static/help.js"></script>
+</body>
+</html>

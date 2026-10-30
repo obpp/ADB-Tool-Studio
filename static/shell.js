@@ -86,6 +86,15 @@ window.SHELL = (function () {
     theme.setAttribute('aria-label', '切换浅色 / 深色主题');
     actions.appendChild(theme);
 
+    // 说明页不在工具列表里，它是「怎么用」，不是「能跑什么」
+    var help = el('a', 'btn ghost small', '使用说明');
+    help.id = 'help';
+    help.href = '/help';
+    help.title = '每个功能做什么、怎么用、容易踩哪些坑';
+    help.setAttribute('aria-label', '使用说明');
+    if (activeId === 'help') help.setAttribute('aria-current', 'page');
+    actions.appendChild(help);
+
     aside.appendChild(foot);
 
     stopAll.addEventListener('click', function () {

@@ -58,84 +58,89 @@
     <div class="workspace">
 
       <section class="pane pane-params">
+        <details class="group" open>
+          <summary class="pane-head">
+            <h2 class="pane-title">参数</h2>
+          </summary>
 
-        <div class="pane-head">
-          <h2 class="pane-title">参数</h2>
-        </div>
+          <form id="config-form" class="config-grid">
 
-        <form id="config-form" class="config-grid">
+            <label class="field span-2">
+              <span class="field-label">adb 路径</span>
+              <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
+            </label>
 
-          <label class="field span-2">
-            <span class="field-label">adb 路径</span>
-            <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
-          </label>
-
-          <div class="field span-2">
-            <label class="field-label" for="cfg-serial">目标设备</label>
-            <span class="field-inline">
-              <select id="cfg-serial"></select>
-              <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
-            </span>
-          </div>
-
-          <label class="field span-2">
-            <span class="field-label">单步超时（秒）</span>
-            <input id="cfg-timeout" type="number" min="30" max="7200" step="10">
-          </label>
-
-          <div class="form-actions span-2">
-            <button class="btn primary" type="submit">保存参数</button>
-            <span id="cfg-status" class="form-status" role="status"></span>
-          </div>
-        </form>
-
-        <div class="pane-head">
-          <h2 class="pane-title">预设</h2>
-          <span id="preset-status" class="form-status" role="status"></span>
-          <button id="btn-new" class="btn ghost small" type="button">新建</button>
-        </div>
-        <ul id="preset-list" class="scripts" data-kind="preset" aria-label="已保存的预设"></ul>
-
-        <div class="pane-head">
-          <h2 class="pane-title">预设内容</h2>
-        </div>
-
-        <form id="preset-form" class="config-grid">
-
-          <label class="field span-2">
-            <span class="field-label">名称（留空就用镜像文件名）</span>
-            <input id="preset-name" type="text" autocomplete="off" placeholder="比如 RK3576 boot">
-          </label>
-
-          <label class="field span-2">
-            <span class="field-label">推送目录（设备上）</span>
-            <input id="preset-pushdir" type="text" autocomplete="off" spellcheck="false">
-          </label>
-
-          <div class="field span-2">
-            <span class="field-label">镜像与写入目标</span>
-            <ul id="image-rows" class="image-rows" aria-label="镜像与写入目标列表"></ul>
-            <div class="image-rows-actions">
-              <button id="btn-add-image" class="btn ghost small" type="button">添加镜像</button>
-              <span class="hint">每行一个镜像；目标可以写完整路径，也可以只写分区名
-                （如 boot_a、boot_b），会自动补成 /dev/block/by-name/。
-                同一行写多个目标时用空格或逗号分隔。</span>
+            <div class="field span-2">
+              <label class="field-label" for="cfg-serial">目标设备</label>
+              <span class="field-inline">
+                <select id="cfg-serial"></select>
+                <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
+              </span>
             </div>
-          </div>
 
-          <label class="check span-2">
-            <input id="preset-reboot" type="checkbox" checked> 写入完成后重启设备
-          </label>
+            <label class="field span-2">
+              <span class="field-label">单步超时（秒）</span>
+              <input id="cfg-timeout" type="number" min="30" max="7200" step="10">
+            </label>
 
-          <div class="form-actions span-2">
-            <button id="btn-save" class="btn primary" type="submit">保存预设</button>
-            <button id="btn-delete" class="btn danger" type="button" disabled>删除</button>
-            <span id="form-status" class="form-status" role="status"></span>
-          </div>
-        </form>
+            <div class="form-actions span-2">
+              <button class="btn primary" type="submit">保存参数</button>
+              <span id="cfg-status" class="form-status" role="status"></span>
+            </div>
+          </form>
+        </details>
 
-        <p class="hint">镜像不会复制进程序目录，这里只记录路径；文件被移走或删掉后要重新选。
-          推送目录和写入目标只能用 / 开头的绝对路径。</p>
+        <details class="group" open>
+          <summary class="pane-head">
+            <h2 class="pane-title">预设</h2>
+            <span id="preset-status" class="form-status" role="status"></span>
+            <button id="btn-new" class="btn ghost small" type="button">新建</button>
+          </summary>
+          <ul id="preset-list" class="scripts" data-kind="preset" aria-label="已保存的预设"></ul>
+        </details>
+
+        <details class="group" open>
+          <summary class="pane-head">
+            <h2 class="pane-title">预设内容</h2>
+          </summary>
+
+          <form id="preset-form" class="config-grid">
+
+            <label class="field span-2">
+              <span class="field-label">名称（留空就用镜像文件名）</span>
+              <input id="preset-name" type="text" autocomplete="off" placeholder="比如 RK3576 boot">
+            </label>
+
+            <label class="field span-2">
+              <span class="field-label">推送目录（设备上）</span>
+              <input id="preset-pushdir" type="text" autocomplete="off" spellcheck="false">
+            </label>
+
+            <div class="field span-2">
+              <span class="field-label">镜像与写入目标</span>
+              <ul id="image-rows" class="image-rows" aria-label="镜像与写入目标列表"></ul>
+              <div class="image-rows-actions">
+                <button id="btn-add-image" class="btn ghost small" type="button">添加镜像</button>
+                <span class="hint">每行一个镜像；目标可以写完整路径，也可以只写分区名
+                  （如 boot_a、boot_b），会自动补成 /dev/block/by-name/。
+                  同一行写多个目标时用空格或逗号分隔。</span>
+              </div>
+            </div>
+
+            <label class="check span-2">
+              <input id="preset-reboot" type="checkbox" checked> 写入完成后重启设备
+            </label>
+
+            <div class="form-actions span-2">
+              <button id="btn-save" class="btn primary" type="submit">保存预设</button>
+              <button id="btn-delete" class="btn danger" type="button" disabled>删除</button>
+              <span id="form-status" class="form-status" role="status"></span>
+            </div>
+          </form>
+
+          <p class="hint">镜像不会复制进程序目录，这里只记录路径；文件被移走或删掉后要重新选。
+            推送目录和写入目标只能用 / 开头的绝对路径。</p>
+        </details>
 
       </section>
 

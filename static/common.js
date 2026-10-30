@@ -128,11 +128,29 @@ window.ADB = (function () {
 
   /* ---------------- 日志台 ---------------- */
 
+  // 过滤选择存的是「哪些级别被隐藏」，换页面 / 重开窗口都沿用；
+  // 以后新增级别时它不在列表里，默认就是显示。
+  var LOG_FILTER_KEY = 'ats-log-filter';
+
+  function setCount(el, n) {
+    var text = String(n);
+    if (el && el.textContent !== text) el.textContent = text;
+  }
+
   function LogConsole(el, followEl, options) {
     options = options || {};
     this.el = el;
     this.follow = followEl;
     this.max = options.max || 2000;
+    this._counts = { cmd: 0, info: 0, ok: 0, warn: 0, err: 0 };
+    this._total = 0;        // 缓冲区里的总条数
+    this._lines = 0;        // DOM 里的 .line 数，_trim 用
+    this._hidden = {};      // level -> true 表示这一类型不显示
+    this._chips = {};
+    this._allChip = null;
+    this._hint = null;
+    this._loadFilters();
+    this._buildFilters();
     var self = this;
     if (followEl) {
       // 用户自己往上翻时自动取消跟随
@@ -143,10 +161,145 @@ window.ADB = (function () {
     }
   }
 
+  LogConsole.prototype._loadFilters = function () {
+    var hidden = null;
+    try {
+      var saved = JSON.parse(localStorage.getItem(LOG_FILTER_KEY) || 'null');
+      if (Object.prototype.toString.call(saved) === '[object Array]') {
+        hidden = {};
+        for (var i = 0; i < saved.length; i++) hidden[saved[i]] = true;
+      }
+    } catch (e) { /* 隐私模式或坏数据：按全部显示处理 */ }
+    for (var j = 0; j < LEVELS.length; j++) {
+      this._hidden[LEVELS[j]] = !!(hidden && hidden[LEVELS[j]]);
+    }
+  };
+
+  LogConsole.prototype._saveFilters = function () {
+    var hidden = [];
+    for (var i = 0; i < LEVELS.length; i++) {
+      if (this._hidden[LEVELS[i]]) hidden.push(LEVELS[i]);
+    }
+    try { localStorage.setItem(LOG_FILTER_KEY, JSON.stringify(hidden)); } catch (e) {}
+  };
+
+  LogConsole.prototype._chip = function (label, level) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'log-chip' + (level ? '' : ' log-chip-all');
+    btn.setAttribute('aria-pressed', 'true');
+    btn.setAttribute('data-level', level || '');
+    btn.title = level ? '显示 / 隐藏' + label + '日志' : '显示全部类型';
+    var name = document.createElement('span');
+    name.className = 'log-chip-name';
+    name.textContent = label;
+    var n = document.createElement('span');
+    n.className = 'n';
+    n.textContent = '0';
+    btn.appendChild(name);
+    btn.appendChild(n);
+    return btn;
+  };
+
+  LogConsole.prototype._buildFilters = function () {
+    var self = this;
+    var bar = document.createElement('div');
+    bar.className = 'log-filters';
+    bar.setAttribute('role', 'group');
+    bar.setAttribute('aria-label', '日志类型过滤');
+
+    this._allChip = this._chip('全部', null);
+    this._allChip.addEventListener('click', function () {
+      for (var i = 0; i < LEVELS.length; i++) self._hidden[LEVELS[i]] = false;
+      self._saveFilters();
+      self._applyFilters();
+    });
+    bar.appendChild(this._allChip);
+
+    var sep = document.createElement('span');
+    sep.className = 'sep';
+    sep.setAttribute('aria-hidden', 'true');
+    bar.appendChild(sep);
+
+    for (var i = 0; i < LEVELS.length; i++) {
+      (function (level) {
+        var chip = self._chip(LEVEL_TEXT[level], level);
+        chip.addEventListener('click', function () {
+          self._hidden[level] = !self._hidden[level];
+          self._saveFilters();
+          self._applyFilters();
+        });
+        bar.appendChild(chip);
+        self._chips[level] = chip;
+      })(LEVELS[i]);
+    }
+
+    if (this.el.parentNode) this.el.parentNode.insertBefore(bar, this.el);
+    this._refreshChips();
+  };
+
+  LogConsole.prototype._visible = function () {
+    var n = 0;
+    for (var i = 0; i < LEVELS.length; i++) {
+      if (!this._hidden[LEVELS[i]]) n += this._counts[LEVELS[i]] || 0;
+    }
+    return n;
+  };
+
+  LogConsole.prototype._refreshChips = function () {
+    var allOn = true;
+    for (var i = 0; i < LEVELS.length; i++) {
+      var level = LEVELS[i];
+      var on = !this._hidden[level];
+      if (!on) allOn = false;
+      var chip = this._chips[level];
+      if (!chip) continue;
+      chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+      setCount(chip.querySelector('.n'), this._counts[level] || 0);
+    }
+    if (this._allChip) {
+      this._allChip.setAttribute('aria-pressed', allOn ? 'true' : 'false');
+      this._allChip.querySelector('.log-chip-name').textContent =
+        allOn ? '全部' : '全选';
+      setCount(this._allChip.querySelector('.n'), this._total);
+    }
+  };
+
+  // 过滤只切 display，不删行：历史日志还在缓冲区里，点回来马上就能看见。
+  LogConsole.prototype._applyFilters = function () {
+    var children = this.el.children;
+    for (var i = 0; i < children.length; i++) {
+      var line = children[i];
+      if (!line.classList || !line.classList.contains('line')) continue;
+      line.classList.toggle('is-hidden',
+                            !!this._hidden[line.getAttribute('data-level')]);
+    }
+    this._refreshChips();
+    this._refreshEmpty();
+    this._scroll();
+  };
+
+  LogConsole.prototype._refreshEmpty = function () {
+    var show = this._total > 0 && this._visible() === 0;
+    if (show) {
+      if (!this._hint) {
+        this._hint = document.createElement('div');
+        this._hint.className = 'log-hint';
+        this.el.appendChild(this._hint);
+      }
+      this._hint.textContent =
+        '没有符合当前过滤条件的日志（共 ' + this._total + ' 条）';
+    } else if (this._hint) {
+      this.el.removeChild(this._hint);
+      this._hint = null;
+    }
+  };
+
   LogConsole.prototype._line = function (entry) {
+    var level = entry.level;
     var line = document.createElement('div');
-    line.className = 'line';
-    line.setAttribute('data-level', entry.level);
+    line.className = 'line' + (this._hidden[level] ? ' is-hidden' : '');
+    line.setAttribute('data-level', level);
 
     var ts = document.createElement('span');
     ts.className = 'ts';
@@ -156,7 +309,7 @@ window.ADB = (function () {
     tag.className = 'tag';
     var tagText = document.createElement('span');
     tagText.className = 'tag-text';
-    tagText.textContent = LEVEL_TEXT[entry.level] || entry.level;
+    tagText.textContent = LEVEL_TEXT[level] || level;
     tag.appendChild(tagText);
 
     var msg = document.createElement('span');
@@ -166,12 +319,24 @@ window.ADB = (function () {
     line.appendChild(ts);
     line.appendChild(tag);
     line.appendChild(msg);
+
+    this._counts[level] = (this._counts[level] || 0) + 1;
+    this._total++;
+    this._lines++;
     return line;
   };
 
   LogConsole.prototype._trim = function () {
-    while (this.el.childElementCount > this.max) {
-      this.el.removeChild(this.el.firstElementChild);
+    while (this._lines > this.max) {
+      var first = this.el.firstElementChild;
+      if (!first) break;
+      if (first.classList && first.classList.contains('line')) {
+        var level = first.getAttribute('data-level');
+        if (this._counts[level]) this._counts[level]--;
+        this._total--;
+        this._lines--;
+      }
+      this.el.removeChild(first);
     }
   };
 
@@ -183,6 +348,8 @@ window.ADB = (function () {
     this.el.appendChild(this._line(entry));
     this._trim();
     this._scroll();
+    this._refreshChips();
+    this._refreshEmpty();
   };
 
   // 打开页面时一次补几百条历史：攒到一个 fragment 里再挂上，
@@ -197,9 +364,81 @@ window.ADB = (function () {
     this.el.appendChild(frag);
     this._trim();
     this._scroll();
+    this._refreshChips();
+    this._refreshEmpty();
   };
 
-  LogConsole.prototype.clear = function () { this.el.textContent = ''; };
+  LogConsole.prototype.clear = function () {
+    this.el.textContent = '';
+    this._lines = 0;
+    this._total = 0;
+    this._hint = null;
+    for (var i = 0; i < LEVELS.length; i++) this._counts[LEVELS[i]] = 0;
+    this._refreshChips();
+  };
+
+  /* ---------------- 参数区块开合 ----------------
+   * 左栏的每个区块都是 <details class="group">，开合本身由浏览器负责；
+   * 这里只补两件事：按页面记住哪些被收起来了，以及别让标题行里的按钮
+   * （刷新、导入…）顺手把整块收起来。
+   */
+  var GROUPS_KEY = 'ats-groups-closed';
+
+  // 区块用标题文字当键：标题不会变，也就不用给每块再加一个 id
+  function groupName(details) {
+    var title = details.querySelector('summary .pane-title');
+    return title ? title.textContent.trim() : '';
+  }
+
+  function readCollapsedGroups() {
+    try {
+      var all = JSON.parse(localStorage.getItem(GROUPS_KEY) || '{}');
+      var list = all && all[location.pathname];
+      return Object.prototype.toString.call(list) === '[object Array]' ? list : [];
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function writeCollapsedGroups(groups) {
+    var names = [];
+    for (var i = 0; i < groups.length; i++) {
+      if (!groups[i].open) names.push(groupName(groups[i]));
+    }
+    try {
+      var all = JSON.parse(localStorage.getItem(GROUPS_KEY) || '{}');
+      if (!all || Object.prototype.toString.call(all) !== '[object Object]') all = {};
+      all[location.pathname] = names;
+      localStorage.setItem(GROUPS_KEY, JSON.stringify(all));
+    } catch (e) { /* 隐私模式：只是不记忆，开合照常 */ }
+  }
+
+  function initGroups() {
+    var groups = document.querySelectorAll('details.group');
+    if (!groups.length) return;
+    var closed = readCollapsedGroups();
+    for (var i = 0; i < groups.length; i++) {
+      if (closed.indexOf(groupName(groups[i])) >= 0) groups[i].open = false;
+      groups[i].addEventListener('toggle', function () {
+        writeCollapsedGroups(groups);
+      });
+    }
+  }
+
+  // 点在 summary 里的按钮/链接上时，拦下 <summary> 的默认开合动作，
+  // 但只在点确实落在 summary 内部时才拦 —— 页面别处的按钮不受影响。
+  document.addEventListener('click', function (ev) {
+    var node = ev.target;
+    var onControl = false;
+    while (node && node !== document) {
+      if (node.tagName === 'SUMMARY') {
+        if (onControl) ev.preventDefault();
+        return;
+      }
+      if (node.tagName === 'BUTTON' || node.tagName === 'A') onControl = true;
+      node = node.parentNode;
+    }
+  }, true);
 
   /* ---------------- 工具客户端 ---------------- */
 
@@ -396,6 +635,8 @@ window.ADB = (function () {
   heartbeat();
   setInterval(heartbeat, 10000);
   document.addEventListener('visibilitychange', heartbeat);
+
+  initGroups();
 
   return {
     $: $,

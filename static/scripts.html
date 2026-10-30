@@ -46,61 +46,82 @@
     <div class="workspace">
 
       <section class="pane pane-params pane-scripts">
+        <details class="group" open>
+          <summary class="pane-head">
+            <h2 class="pane-title">参数</h2>
+          </summary>
 
-        <div class="pane-head">
-          <h2 class="pane-title">参数</h2>
-        </div>
+          <form id="config-form" class="config-grid">
 
-        <form id="config-form" class="config-grid">
+            <label class="field span-2">
+              <span class="field-label">adb 路径</span>
+              <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
+            </label>
 
-          <label class="field span-2">
-            <span class="field-label">adb 路径</span>
-            <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
-          </label>
+            <div class="field span-2">
+              <label class="field-label" for="cfg-serial">目标设备</label>
+              <span class="field-inline">
+                <select id="cfg-serial"></select>
+                <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
+              </span>
+            </div>
 
-          <div class="field span-2">
-            <label class="field-label" for="cfg-serial">目标设备</label>
-            <span class="field-inline">
-              <select id="cfg-serial"></select>
-              <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
-            </span>
+            <label class="field">
+              <span class="field-label">远程目录</span>
+              <input id="cfg-remote" type="text" autocomplete="off" spellcheck="false">
+            </label>
+
+            <label class="field">
+              <span class="field-label">超时（秒）</span>
+              <input id="cfg-timeout" type="number" min="5" max="3600" step="1">
+            </label>
+
+            <div class="field span-2">
+              <label class="check"><input id="cfg-loop" type="checkbox"> 循环执行</label>
+              <span class="loop-row" id="loop-row">
+                <span class="loop-opt">
+                  <span class="field-label">间隔</span>
+                  <input id="cfg-loop-interval" type="number" min="0" max="86400" step="1">
+                  <span class="field-label">秒</span>
+                </span>
+                <span class="loop-opt">
+                  <span class="field-label">次数</span>
+                  <input id="cfg-loop-count" type="number" min="0" max="1000000" step="1">
+                  <span class="field-label">（0 = 不限）</span>
+                </span>
+                <label class="check small"><input id="cfg-loop-stop-fail" type="checkbox"> 失败即停</label>
+              </span>
+              <span class="hint" id="loop-hint">每轮都重新推送并执行一次；不勾「失败即停」时某轮失败会照常进入下一轮。</span>
+            </div>
+
+            <label class="field span-2 script-args">
+              <span class="field-label">脚本参数</span>
+              <input id="cfg-args" type="text" autocomplete="off" spellcheck="false" disabled
+                     placeholder="空格分隔，支持 &quot;...&quot; 和 '...'；例如 --mode 2 &quot;hello world&quot;">
+              <span class="hint">接在设备上的 sh 命令后面，跟着选中的脚本保存，执行前自动存一次。</span>
+            </label>
+
+            <div class="form-actions span-2">
+              <button class="btn primary" type="submit">保存参数</button>
+              <span id="cfg-status" class="form-status" role="status"></span>
+            </div>
+          </form>
+        </details>
+
+        <details class="group" open>
+          <summary class="pane-head">
+            <h2 class="pane-title">脚本库</h2>
+            <span id="script-status" class="form-status" role="status"></span>
+            <button id="btn-import" class="btn ghost small" type="button">导入脚本…</button>
+          </summary>
+          <input id="file-input" type="file" hidden>
+          <div id="script-drop" class="script-drop">
+            <ul id="script-list" class="scripts" aria-label="已导入的脚本">
+              <li class="dev-empty">还没有脚本，点「导入脚本…」选一个</li>
+            </ul>
+            <p class="hint">也可以把文件拖到脚本库下方的任意位置。导入时会统一换行符（CRLF → LF）。</p>
           </div>
-
-          <label class="field">
-            <span class="field-label">远程目录</span>
-            <input id="cfg-remote" type="text" autocomplete="off" spellcheck="false">
-          </label>
-
-          <label class="field">
-            <span class="field-label">超时（秒）</span>
-            <input id="cfg-timeout" type="number" min="5" max="3600" step="1">
-          </label>
-
-          <label class="field span-2 script-args">
-            <span class="field-label">脚本参数</span>
-            <input id="cfg-args" type="text" autocomplete="off" spellcheck="false" disabled
-                   placeholder="空格分隔，支持 &quot;...&quot; 和 '...'；例如 --mode 2 &quot;hello world&quot;">
-            <span class="hint">接在设备上的 sh 命令后面，跟着选中的脚本保存，执行前自动存一次。</span>
-          </label>
-
-          <div class="form-actions span-2">
-            <button class="btn primary" type="submit">保存参数</button>
-            <span id="cfg-status" class="form-status" role="status"></span>
-          </div>
-        </form>
-
-        <div class="pane-head">
-          <h2 class="pane-title">脚本库</h2>
-          <span id="script-status" class="form-status" role="status"></span>
-          <button id="btn-import" class="btn ghost small" type="button">导入脚本…</button>
-        </div>
-        <input id="file-input" type="file" hidden>
-        <div id="script-drop" class="script-drop">
-          <ul id="script-list" class="scripts" aria-label="已导入的脚本">
-            <li class="dev-empty">还没有脚本，点「导入脚本…」选一个</li>
-          </ul>
-          <p class="hint">也可以把文件拖到脚本库下方的任意位置。导入时会统一换行符（CRLF → LF）。</p>
-        </div>
+        </details>
 
       </section>
 
