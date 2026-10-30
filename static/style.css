@@ -912,6 +912,48 @@ input[data-tone="error"] { border-color: var(--critical); }
 .line[data-level="ok"]   .msg { color: var(--ink); }
 .line[data-level="err"]  .msg { color: var(--ink); font-weight: 500; }
 
+/* 日志类型过滤。chip 表达的是「显示 / 隐藏」，不是状态，所以不占用状态色；
+ * 开着的是实线 + 凹陷底色，关掉的是虚线 + 更淡的墨色。 */
+.log-filters {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.log-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 9px;
+  border: 1px dashed var(--rule);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-3);
+  font-family: var(--font);
+  font-size: 12px;
+  line-height: 1.7;
+  cursor: pointer;
+}
+.log-chip:hover { color: var(--ink-2); border-color: var(--ink-3); }
+.log-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.log-chip .n { font-variant-numeric: tabular-nums; font-size: 11px; }
+.log-chip[aria-pressed="true"] {
+  border-style: solid;
+  background: var(--surface);
+  color: var(--ink);
+}
+.log-chip[aria-pressed="true"] .n { color: var(--ink-2); }
+.log-filters .sep {
+  width: 1px;
+  height: 16px;
+  margin: 0 2px;
+  background: var(--rule);
+}
+
+.line.is-hidden { display: none; }
+.log-hint { padding: 2px 8px; color: var(--ink-3); }
+
 /* ---------------------------------------------------------------- 窄窗口 */
 
 /* 侧边栏收成图标条：只留灯 + 一个字形，名称走 title */
