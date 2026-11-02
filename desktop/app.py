@@ -166,6 +166,31 @@ class PageApi(object):
             return None
         return paths[0]
 
+    def pick_files(self, directory=""):
+        """多选任意类型的文件，返回完整路径列表；取消返回空列表。
+
+        推送文件的预设用它挑本地文件：浏览器拿不到完整路径，
+        只有桌面版的这座桥能给出路径。网页版退回服务端的目录浏览器。
+        """
+        import webview
+        if not webview.windows:
+            return []
+        window = webview.windows[0]
+        directory = os.path.expanduser(directory) if isinstance(directory, str) else ""
+        if not directory or not os.path.isdir(directory):
+            directory = ""
+        try:
+            paths = window.create_file_dialog(
+                webview.FileDialog.OPEN,
+                directory=directory,
+                allow_multiple=True,
+                file_types=("所有文件 (*.*)",),
+            )
+        except Exception as exc:
+            log("打开文件对话框失败: %r" % (exc,))
+            return []
+        return list(paths or [])
+
 
 class DesktopApp(object):
 

@@ -621,6 +621,9 @@ input:focus-visible, select:focus-visible {
 .scripts[data-kind="preset"] .script.is-running .script-name::after {
   content: " 烧写中";
 }
+.scripts[data-kind="push-preset"] .script.is-running .script-name::after {
+  content: " 推送中";
+}
 
 /* 列表标题行里的状态字：靠右挤在按钮旁边 */
 #script-status, #preset-status, #file-status { margin-left: auto; }
@@ -689,8 +692,114 @@ input:focus-visible, select:focus-visible {
 /* 文件少的时候把说明沉到框底，别顶着列表 */
 .push-drop > .hint { margin-top: auto; }
 
-/* 推送目录字段和保存按钮不在一个 form 网格里，自己留出间距 */
-.pane-push > .form-actions { margin-top: 14px; }
+/* 预设的拖放区：文件少时也留出一大块好放的地方，多了长到 320px 再滚 */
+.preset-drop { height: auto; min-height: 200px; max-height: 320px; }
+
+/* ---------------------------------------------------------------- 推送内容 */
+
+/* 两种来源的切换：文字标签 + 一条下划线，比一排按钮轻得多 */
+.mode-tabs {
+  display: flex;
+  gap: 2px;
+  margin: 0 0 14px;
+  border-bottom: 1px solid var(--rule-2);
+}
+.mode-tab {
+  appearance: none;
+  padding: 6px 8px 7px;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-3);
+  cursor: pointer;
+}
+.mode-tab:hover { color: var(--ink); background: var(--rule-2); }
+.mode-tab.is-active {
+  color: var(--ink);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+.mode-tab:focus-visible { outline-offset: -2px; }
+
+/* 面板用 hidden 切换；万一以后给它加了 display，也还是能被 hidden 盖掉 */
+.mode-panel[hidden] { display: none; }
+
+/* 一小段标题行：左边说明，右边动作 */
+.mode-subhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+}
+
+/* 预设列表和下面的编辑表单之间留一口气 */
+#preset-form { margin-top: 14px; }
+/* 临时文件：目录字段和上面的虚线框分开 */
+.mode-field { margin-top: 14px; }
+
+/* remount 是推送行为，不是预设元数据；用一条细线和编辑表单隔开 */
+.remount-field {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule-2);
+}
+
+/* 状态只有一处：内容区底部，两个标签共用 */
+.mode-status {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--rule-2);
+  min-height: 1.4em;
+}
+
+/* 预设里的本地文件：只记路径。一行一个，长路径截断，悬停看全 */
+.preset-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.preset-files .dev-empty { padding: 6px 8px; }
+.preset-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 1px 8px;
+  padding: 5px 8px;
+  border: 1px solid var(--rule-2);
+  border-radius: var(--radius);
+  background: var(--sunk);
+}
+.preset-file-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preset-file-path {
+  font-size: 11px;
+  color: var(--ink-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preset-file .btn { grid-row: 1 / span 2; grid-column: 2; align-self: center; }
+.preset-files-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.preset-files-actions .hint { flex: 1; min-width: 200px; margin: 2px 0 0; }
 
 /* 常用目录：点一下填进输入框，还是要按保存才生效 */
 .push-chips { display: flex; flex-wrap: wrap; gap: 6px; }

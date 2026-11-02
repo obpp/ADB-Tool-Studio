@@ -424,7 +424,13 @@ adb -s <序列号> shell "reboot"
 
 ### 5. 推送文件（`/push-file`）
 
-普通的 `adb push`：把本地文件搬到设备上的指定目录，**不写分区、不重启、不保存预设**。
+普通的 `adb push`：把本地文件搬到设备上的指定目录，**不写分区、不重启**。
+
+左边只有两块：**参数**（adb 路径、目标设备）和**推送内容**。推送内容顶上用
+「临时文件 / 预设」两个标签切换推什么；页头那个「开始推送」推的永远是当前标签里的东西，
+不另设第二个主按钮。
+
+**临时文件标签**
 
 - 源文件有两种加法：拖进那个虚线框（拖拽范围就是框本身，拖到框外不会上传），
   或点「选择文件…」多选。桌面版和网页版都这样 —— 窗口里的页面拿不到本机完整路径，
@@ -439,6 +445,33 @@ adb -s <序列号> shell "reboot"
 - 「停止」只打断**正在推的那一个**；已经推完的文件不会回滚，当前这个可能只推了一半
 - 单个文件上限 4 GB；推送超时按大小放宽：至少 120 秒，每 1 MB 再加 1 秒，最多 7200 秒
 - 推送目录必须是 `/` 开头的绝对路径，相对路径在页面上就会被拦下
+
+**预设标签**
+
+- 一个预设 = 名字 + 设备上的目录 + 一组本地文件。推送时才从原位置读，
+  换机器、挪了文件，界面上会提示找不到并跳过那一个
+- 加文件和临时文件一样有两种方式：拖进虚线框，或点「选择文件…」
+  - **桌面版点按钮**：直接弹系统的多选对话框（原生桥 `pick_files`），
+    拿到的是本机完整路径，只记路径、不复制
+  - **拖进去，或在网页版里选**：浏览器只给 `File` 对象、没有路径，
+    所以先把文件复制一份到数据目录 `files\push_file\`，预设记的是这份副本的路径。
+    内容相同（按 SHA-1）只存一份；从预设里移除、或删掉预设后，
+    没有别的预设在用的副本会被清掉
+- 选中列表里的预设后，页头「开始推送」就按预设执行，不用往虚线框里加文件；
+  表单有未保存的修改时会拦住，先保存再推
+- 清单存在 `config/push_file.presets.json`（运行时数据，不进仓库）；同名文件在设备上
+  后面的会覆盖前面的，保存时日志里会警告
+- 预设里有文件被删了不会阻止推送：找不到的跳过并在日志里记一笔，其余照推
+- 标签页的选择记在 `localStorage`（`ats-push-mode`），下次打开还是上次那个
+
+**只读分区（root + remount）**
+
+- 开关只在「预设」标签里出现：勾上后，推送前依次执行 `adb root` → `adb wait-for-device`
+  → `adb remount`，三步都成功才开始推
+- 任何一步失败就停在这一步，不会接着让每个文件各报一次只读错误：
+  `adb root` 失败（生产版固件常见）提示先解锁 / 换 eng 版本；
+  `adb remount` 失败提示可能需要 `adb disable-verity` 后重启
+- 这个设置跟着参数一起保存，下次打开仍在
 
 ## 日志过滤
 
@@ -498,7 +531,7 @@ adb -s <序列号> shell "reboot"
 | GET | `/api/<id>/state` | 单个工具的全量状态 + 最近 500 条日志 |
 | GET | `/api/<id>/events` | SSE 流，事件：`snapshot` / `state` / `log` |
 | GET | `/api/<id>/devices` | 刷新并返回设备列表（always-adb、脚本执行、替换镜像、推送文件） |
-| POST | `/api/<id>/start` | 启动，body 可带选项（always-adb `once`、脚本执行 `scriptId`、替换镜像 `presetId`；推送文件不用选项） |
+| POST | `/api/<id>/start` | 启动，body 可带选项（always-adb `once`、脚本执行 `scriptId`、替换镜像 `presetId`、推送文件 `presetId`：按预设推，不传则推虚线框里的文件） |
 | POST | `/api/<id>/stop` | 停止，会打断正在进行的等待并杀掉子进程 |
 | POST | `/api/<id>/config` | 更新配置，按补丁合并，字段范围夹紧后落盘 |
 | POST | `/api/<id>/preview` | 只返回命令行预览，不执行（隧道） |
@@ -517,13 +550,17 @@ adb -s <序列号> shell "reboot"
 | POST | `/api/push_file/files/remove` | 从待推送列表移除一个（`id`；推送中返回 409） |
 | POST | `/api/push_file/files/clear` | 清空待推送列表（推送中返回 409） |
 | POST | `/api/push_file/fs/list` | 列设备上的目录，供目录浏览器用（`path`；只返回目录） |
+| POST | `/api/push_file/presets/upload?name=` | 把一个文件复制进预设文件目录 `files/push_file/`，返回副本的绝对路径（拖拽 / 网页版选文件用，流式写盘，上限 4 GB） |
+| POST | `/api/push_file/presets/save` | 保存或新建预设（`id` 可空、`name`、`dir`、`files` 为路径或 `{path}` 列表） |
+| POST | `/api/push_file/presets/delete` | 删除预设（`id`；正在推送这个预设时返回 409） |
 
 工具自己的动作走 `Tool.api()` 这个通用出口（`server.py` 里不用为每个功能加分支），
 返回 `None` 表示不认识这个 action，最后统一落到 404。
 
-文件上传是唯一的例外：`files/upload` 在 `server.py` 里赶在 `_read_body()` 之前接走，
-直接交给工具的 `upload(rfile, length, query)` 边读边写盘 —— 通用那条路有 2 MB 上限，
-而这里可能是几个 GB。响应用完就关连接（中途拒绝时请求体可能没读完，keep-alive 会串包）。
+文件上传是唯一的例外：`files/upload` / `presets/upload` 在 `server.py` 里赶在 `_read_body()`
+之前接走，直接交给工具的 `upload(rfile, length, query, action)` 边读边写盘 —— 通用那条路
+有 2 MB 上限，而这里可能是几个 GB。响应用完就关连接（中途拒绝时请求体可能没读完，
+keep-alive 会串包）。
 
 设备列表不靠前端轮询来发现上线：页面第一次请求 `/api/<id>/devices` 后，后端会为这个工具
 常驻一条 `adb wait-for-device`（当前无设备）或 `adb -s <序列号> wait-for-disconnect`（已有设备）。
