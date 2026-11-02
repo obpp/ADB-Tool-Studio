@@ -126,11 +126,18 @@
 
           <div id="tab-preset" class="mode-panel" role="tabpanel" aria-labelledby="mode-preset" hidden>
 
-            <div class="mode-subhead">
-              <span class="field-label">已保存的预设</span>
-              <button id="btn-new-preset" class="btn ghost small" type="button">新建</button>
-            </div>
-            <ul id="preset-list" class="scripts" data-kind="push-preset" aria-label="已保存的推送预设"></ul>
+            <!-- 预设多了会占掉整屏，把列表做成可折叠的一块：收起后只剩标题行和「新建」 -->
+            <details class="group preset-list-group" open>
+              <summary class="pane-head">
+                <h2 class="pane-title">已保存的预设</h2>
+                <span class="pane-tools">
+                  <span id="preset-count" class="preset-count"></span>
+                  <button id="btn-new-preset" class="btn ghost small" type="button">新建</button>
+                </span>
+              </summary>
+              <ul id="preset-list" class="scripts" data-kind="push-preset" aria-label="已保存的推送预设"></ul>
+              <p class="hint">双击列表项可直接推送。</p>
+            </details>
 
             <form id="preset-form" class="config-grid" autocomplete="off">
 

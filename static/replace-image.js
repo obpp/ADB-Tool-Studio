@@ -214,8 +214,19 @@
         (row.targets.join(', ') || '未设目标');
     }).join('\n');
     li.title = item.name + '\n' + detail +
-      '\n推送目录 ' + item.pushDir + (item.reboot ? '\n完成后重启' : '\n不重启');
+      '\n推送目录 ' + item.pushDir + (item.reboot ? '\n完成后重启' : '\n不重启') +
+      '\n双击直接执行（仍需确认）';
     li.addEventListener('click', function () { selectPreset(item.id); });
+    // 双击 = 选中后直接走执行流程；烧写仍然要先过确认条。
+    // 正在编辑同一个预设时别让选中把它冲掉，先保存再双击。
+    li.addEventListener('dblclick', function () {
+      if (formDirty && editingId === item.id) {
+        setStatus('#preset-status', '预设有未保存的修改，先保存再执行', true);
+        return;
+      }
+      selectPreset(item.id);
+      promptRun();
+    });
     li.addEventListener('keydown', function (ev) {
       if (ev.target !== li) return;
       if (ev.key === 'Enter' || ev.key === ' ') {
@@ -876,7 +887,12 @@
     return el;
   }
 
-  $('#btn-run').addEventListener('click', function () {
+  // 页头按钮和列表双击共用：校验完弹确认条，确认后才真正开始
+  function promptRun() {
+    if (state && state.status !== 'idle') {
+      setStatus('#preset-status', '正在烧写，先停止再操作', true);
+      return;
+    }
     if (!selectedId) {
       setStatus('#preset-status', '先在左边选一个预设', true);
       return;
@@ -900,7 +916,9 @@
       return;
     }
     showConfirm(preset, serial);
-  });
+  }
+
+  $('#btn-run').addEventListener('click', function () { promptRun(); });
 
   $('#btn-confirm-cancel').addEventListener('click', function () {
     hideConfirm();

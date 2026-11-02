@@ -428,6 +428,9 @@
     presetRenderKey = key;
 
     list.textContent = '';
+    // 收起时也能从标题行看出有几个
+    var counter = $('#preset-count');
+    if (counter) counter.textContent = presets.length ? presets.length + ' 个' : '';
 
     if (!presets.length) {
       var empty = document.createElement('li');
@@ -477,9 +480,19 @@
       return '  ' + f.name + '  (' + f.path + ')';
     }).join('\n');
     li.title = item.name + '\n' + detail +
-      '\n推到 ' + (item.dir || '未设目录');
+      '\n推到 ' + (item.dir || '未设目录') + '\n双击直接推送';
 
     li.addEventListener('click', function () { selectPreset(item.id); });
+    // 双击 = 选中后直接按这个预设推，和页头「开始推送」一样。
+    // 正在编辑同一个预设时别让选中把它冲掉，先保存再双击。
+    li.addEventListener('dblclick', function () {
+      if (presetDirty && editingId === item.id) {
+        setContentStatus('预设表单有未保存的修改，先保存再推送', true);
+        return;
+      }
+      selectPreset(item.id);
+      runPreset();
+    });
     li.addEventListener('keydown', function (ev) {
       if (ev.target !== li) return;
       if (ev.key === 'Enter' || ev.key === ' ') {
@@ -844,8 +857,13 @@
     });
   });
 
-  // 预设标签下的主按钮行为：直接按预设推，不经过上传队列
+  // 预设标签下的主按钮行为：直接按预设推，不经过上传队列。
+  // 页头按钮和列表双击都走这里。
   function runPreset() {
+    if (state && state.status !== 'idle') {
+      setContentStatus('正在推送，先停止再操作', true);
+      return;
+    }
     if (!selectedId) {
       setContentStatus('先在列表里选一个预设', true);
       return;

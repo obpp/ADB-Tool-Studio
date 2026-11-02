@@ -801,6 +801,10 @@ input:focus-visible, select:focus-visible {
 }
 .preset-files-actions .hint { flex: 1; min-width: 200px; margin: 2px 0 0; }
 
+/* 预设多了只在列表里滚，别把下面的编辑表单一直往下顶 */
+#preset-list { max-height: 240px; overflow-y: auto; scrollbar-width: thin; }
+.preset-count { font-size: 11.5px; color: var(--ink-3); }
+
 /* 常用目录：点一下填进输入框，还是要按保存才生效 */
 .push-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .push-chips .btn { font-family: var(--mono); }
