@@ -337,7 +337,7 @@ class Handler(BaseHTTPRequestHandler):
         # 文件上传是流式的，必须赶在 _read_body() 之前接走：那里会按 2 MB
         # 上限把整个 body 读进内存，而这里可能是几个 GB。工具自己边读边写盘。
         uploader = getattr(tool, "upload", None)
-        if action == "files/upload" and uploader is not None:
+        if action in ("files/upload", "presets/upload") and uploader is not None:
             try:
                 length = int(self.headers.get("Content-Length") or 0)
             except ValueError:
@@ -349,7 +349,7 @@ class Handler(BaseHTTPRequestHandler):
             # 中途放弃（比如超过上限直接拒绝）时 body 没读完，
             # keep-alive 会把剩下的字节当成下一个请求，所以用完即关。
             self.close_connection = True
-            payload, status = uploader(self.rfile, length, query)
+            payload, status = uploader(self.rfile, length, query, action)
             return self._send_json(payload, status)
 
         raw = self._read_body()

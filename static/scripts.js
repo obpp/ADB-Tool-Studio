@@ -231,10 +231,16 @@
     li.appendChild(ops);
 
     li.title = item.name + '\n' + meta.textContent +
-      (item.args ? '\n参数：' + item.args : '');
+      (item.args ? '\n参数：' + item.args : '') + '\n双击直接执行';
     li.addEventListener('click', function (ev) {
       if (ev.target.closest && ev.target.closest('button')) return;
       selectScript(item.id);
+    });
+    // 双击 = 选中后直接执行，和点页头按钮走同一条路；行内的按钮不算
+    li.addEventListener('dblclick', function (ev) {
+      if (ev.target.closest && ev.target.closest('button')) return;
+      selectScript(item.id);
+      runScript(item.id);
     });
     li.addEventListener('keydown', function (ev) {
       if (ev.target !== li) return;
@@ -542,16 +548,22 @@
     });
   }
 
-  $('#btn-run').addEventListener('click', function () {
-    if (!selectedId) {
+  // 页头按钮和列表双击共用：id 不传就用当前选中的
+  function runScript(id) {
+    var target = id || selectedId;
+    if (!target) {
       setStatus('先导入并选一个脚本', true);
+      return;
+    }
+    if (state && state.status !== 'idle') {
+      setStatus('正在执行，先停止再操作', true);
       return;
     }
     // 先落盘参数，免得执行用的还是上一次的设置；脚本参数跟着 start 一起发，
     // 后端收到就记到这个脚本名下，执行用的就是页面上这一串
     client.saveConfig(collectConfig()).then(function () {
       return client.start({
-        scriptId: selectedId,
+        scriptId: target,
         args: argsInput ? argsInput.value.trim() : ''
       });
     }).then(function (data) {
@@ -559,7 +571,9 @@
     }).catch(function () {
       setStatus('请求失败，后端还在吗？', true);
     });
-  });
+  }
+
+  $('#btn-run').addEventListener('click', function () { runScript(); });
 
   $('#btn-stop').addEventListener('click', function () { client.stop(); });
 

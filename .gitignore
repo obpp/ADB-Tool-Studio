@@ -12,3 +12,10 @@ config/replace_image.presets.json
 
 # 运行时数据：隧道里填过的远程主机和用户名，每台机器不一样
 config/ssh_tunnel.json
+
+# 运行时数据：推送文件的 adb 路径、设备、预设里的本机路径
+config/push_file.json
+config/push_file.presets.json
+
+# 运行时数据：拖进来 / 网页版选中的预设文件会复制一份到这里
+files/

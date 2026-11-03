@@ -66,53 +66,125 @@
                 <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
               </span>
             </div>
+
+            <div class="form-actions span-2">
+              <button class="btn primary" type="submit">保存参数</button>
+              <span id="cfg-status" class="form-status" role="status"></span>
+            </div>
           </form>
         </details>
 
         <details class="group" open>
           <summary class="pane-head">
-            <h2 class="pane-title">源文件</h2>
-            <span id="file-status" class="form-status" role="status"></span>
-            <div class="pane-tools">
-              <button id="btn-add" class="btn ghost small" type="button">选择文件…</button>
-              <button id="btn-clear-files" class="btn ghost small" type="button">清空列表</button>
+            <h2 class="pane-title">推送内容</h2>
+          </summary>
+
+          <!-- 推什么、推到哪，只有这一块。两种来源用标签切换：
+               临时传上来的文件，或者存好的预设。 -->
+          <div class="mode-tabs" role="tablist" aria-label="推送内容的来源">
+            <button id="mode-temp" class="mode-tab is-active" type="button"
+                    role="tab" aria-selected="true" aria-controls="tab-temp">临时文件</button>
+            <button id="mode-preset" class="mode-tab" type="button"
+                    role="tab" aria-selected="false" aria-controls="tab-preset">预设</button>
+          </div>
+
+          <div id="tab-temp" class="mode-panel" role="tabpanel" aria-labelledby="mode-temp">
+
+            <div class="mode-subhead">
+              <span class="field-label">文件</span>
+              <span class="pane-tools">
+                <button id="btn-add" class="btn ghost small" type="button">选择文件…</button>
+                <button id="btn-clear-files" class="btn ghost small" type="button">清空列表</button>
+              </span>
             </div>
-          </summary>
-          <input id="file-input" type="file" multiple hidden>
+            <input id="file-input" type="file" multiple hidden>
 
-          <!-- 拖放范围就是这个虚线框：拖到外面不会触发上传 -->
-          <div id="push-drop" class="push-drop">
-            <ul id="file-list" class="push-files" aria-label="待推送文件">
-              <li class="dev-empty">还没有文件。把文件拖进这里，或点「选择文件…」。</li>
-            </ul>
-            <p class="hint">文件会先传到本机的临时目录，再用 adb push 推过去；
-              设备上同名的文件会被覆盖。</p>
-          </div>
-        </details>
+            <!-- 拖放范围就是这个虚线框：拖到外面不会触发上传 -->
+            <div id="push-drop" class="push-drop">
+              <ul id="file-list" class="push-files" aria-label="待推送文件">
+                <li class="dev-empty">还没有文件。把文件拖进这里，或点「选择文件…」。</li>
+              </ul>
+              <p class="hint">文件会先传到本机的临时目录，再用 adb push 推过去；
+                设备上同名的文件会被覆盖。</p>
+            </div>
 
-        <details class="group" open>
-          <summary class="pane-head">
-            <h2 class="pane-title">推送目录</h2>
-          </summary>
-
-          <div class="field">
-            <label class="field-label" for="cfg-pushdir">设备上的目录</label>
-            <span class="field-inline">
-              <input id="cfg-pushdir" type="text" autocomplete="off" spellcheck="false"
-                     placeholder="/data/local/tmp">
-              <button id="btn-browse" class="btn ghost small" type="button">浏览</button>
-            </span>
-            <span class="push-chips">
-              <button class="btn ghost small" type="button" data-dir="/data/local/tmp">/data/local/tmp</button>
-              <button class="btn ghost small" type="button" data-dir="/sdcard/Download">/sdcard/Download</button>
-              <button class="btn ghost small" type="button" data-dir="/mnt">/mnt</button>
-            </span>
-            <span class="hint">必须是 / 开头的绝对路径。文件按原名推到这个目录下。</span>
+            <div class="field mode-field">
+              <label class="field-label" for="cfg-pushdir">设备上的目录</label>
+              <span class="field-inline">
+                <input id="cfg-pushdir" type="text" autocomplete="off" spellcheck="false"
+                       placeholder="/data/local/tmp">
+                <button id="btn-browse" class="btn ghost small" type="button">浏览</button>
+              </span>
+              <span class="push-chips">
+                <button class="btn ghost small" type="button" data-dir="/data/local/tmp">/data/local/tmp</button>
+                <button class="btn ghost small" type="button" data-dir="/sdcard/Download">/sdcard/Download</button>
+                <button class="btn ghost small" type="button" data-dir="/mnt">/mnt</button>
+              </span>
+              <span class="hint">必须是 / 开头的绝对路径。文件按原名推到这个目录下。</span>
+            </div>
           </div>
 
-          <div class="form-actions">
-            <button id="btn-save" class="btn primary" type="button">保存参数</button>
-            <span id="cfg-status" class="form-status" role="status"></span>
+          <div id="tab-preset" class="mode-panel" role="tabpanel" aria-labelledby="mode-preset" hidden>
+
+            <!-- 预设多了会占掉整屏，把列表做成可折叠的一块：收起后只剩标题行和「新建」 -->
+            <details class="group preset-list-group" open>
+              <summary class="pane-head">
+                <h2 class="pane-title">已保存的预设</h2>
+                <span class="pane-tools">
+                  <span id="preset-count" class="preset-count"></span>
+                  <button id="btn-new-preset" class="btn ghost small" type="button">新建</button>
+                </span>
+              </summary>
+              <ul id="preset-list" class="scripts" data-kind="push-preset" aria-label="已保存的推送预设"></ul>
+              <p class="hint">双击列表项可直接推送。</p>
+            </details>
+
+            <form id="preset-form" class="config-grid" autocomplete="off">
+
+              <label class="field span-2">
+                <span class="field-label">名称</span>
+                <input id="preset-name" type="text" autocomplete="off" placeholder="比如 日志三件套">
+              </label>
+
+              <label class="field span-2">
+                <span class="field-label">设备上的目录</span>
+                <input id="preset-dir" type="text" autocomplete="off" spellcheck="false"
+                       placeholder="/data/local/tmp">
+              </label>
+
+              <div class="field span-2">
+                <span class="field-label">本地文件</span>
+                <!-- 和临时文件一样：拖进来，或者点按钮选。
+                     区别是预设要把路径留住，拖进来 / 网页版选的文件会复制一份到数据目录。 -->
+                <div id="preset-drop" class="push-drop preset-drop">
+                  <ul id="preset-files" class="preset-files" aria-label="预设里的文件"></ul>
+                  <p class="hint">把文件拖进这里面，或点下面的「选择文件…」。</p>
+                </div>
+                <input id="preset-file-input" type="file" multiple hidden>
+                <div class="preset-files-actions">
+                  <button id="btn-add-preset-file" class="btn ghost small" type="button">选择文件…</button>
+                  <span class="hint">桌面版直接弹系统的选文件对话框（只记路径）；拖动或在网页版里选的文件，会复制一份到程序的数据目录。</span>
+                </div>
+              </div>
+
+              <div class="form-actions span-2">
+                <button class="btn primary" type="submit">保存预设</button>
+                <button id="btn-delete-preset" class="btn danger" type="button" disabled>删除</button>
+              </div>
+            </form>
+
+            <!-- root/remount 只跟预设走：临时推送通常只往可写目录丢文件 -->
+            <div class="field remount-field">
+              <label class="check"><input id="cfg-remount" type="checkbox"> 先 root 并 remount</label>
+              <span class="hint">往 /system、/vendor 这类只读分区推时勾上：会依次执行
+                <code>adb root</code> → 等设备重新上线 → <code>adb remount</code>，
+                成功后才开始推文件；任何一步失败就停下，不逐个文件报只读。</span>
+            </div>
+          </div>
+
+          <!-- 提示只有这一处，两个标签共用 -->
+          <div class="mode-status">
+            <span id="content-status" class="form-status" role="status"></span>
           </div>
         </details>
 
