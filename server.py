@@ -30,6 +30,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import apppaths
+import datadir
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = apppaths.static_dir()     # 打包后躺在 sys._MEIPASS 里
@@ -63,6 +64,132 @@ class Registry(object):
 
 
 registry = Registry(DATA_DIR, TOOL_CLASSES)
+
+
+# --------------------------------------------------------------------------
+# 设置：数据目录迁移
+# --------------------------------------------------------------------------
+# 换目录要停掉所有正在跑的任务，复制完再换 registry —— 新实例从新目录
+# 读配置，旧实例的设备监听一并停掉。旧 registry 里的 SSE 连接会失效，
+# 所以设置页会提示其他标签页刷新。
+
+_switch_lock = threading.Lock()
+
+
+def running_tool_names():
+    names = []
+    for tool in registry.all():
+        if tool.is_alive() or tool.status != "idle":
+            names.append(tool.name)
+    return names
+
+
+def settings_state():
+    payload = datadir.info()
+    payload["ok"] = True
+    payload["running"] = running_tool_names()
+    return payload
+
+
+def restore_data_dir(old_dir):
+    """把指针和当前进程的目录都改回 old_dir（切换失败时用）。"""
+    try:
+        if os.path.normcase(os.path.abspath(old_dir)) == os.path.normcase(
+                os.path.abspath(apppaths.default_data_dir())):
+            apppaths.clear_data_dir_pointer()
+        else:
+            apppaths.write_data_dir_pointer(old_dir)
+        apppaths.apply_data_dir(old_dir)
+    except (IOError, OSError):
+        pass
+
+
+def switch_data_dir(path, overwrite=False, reset=False, adopt=False, dry_run=False):
+    """三种模式：复制并切换 / 恢复默认 / 直接使用已有目录。
+
+    adopt 配合 dry_run 只检查目标目录，返回预览，不改任何状态。
+
+    整个切换（含重建 registry）串行化：两个标签页同时点的时候，
+    后一个直接回 409，避免两边各自重建 registry、最后指针和实例对不上。
+    用的是非阻塞锁，不会让请求线程排队等一次大复制。
+    """
+    if not _switch_lock.acquire(blocking=False):
+        return {
+            "ok": False,
+            "error": "另一个数据目录切换正在进行，等它结束再试",
+        }, 409
+    try:
+        return _switch_data_dir(path, overwrite, reset, adopt, dry_run)
+    finally:
+        _switch_lock.release()
+
+
+def _switch_data_dir(path, overwrite=False, reset=False, adopt=False, dry_run=False):
+    global registry, DATA_DIR
+
+    running = running_tool_names()
+    if running:
+        return {
+            "ok": False,
+            "error": "%s 正在运行，先全部停止再切换" % "、".join(running),
+        }, 409
+
+    old_dir = apppaths.data_dir()
+    try:
+        if adopt:
+            result = datadir.inspect_existing(path)
+            if dry_run:
+                result["ok"] = True
+                result["dryRun"] = True
+                return result, 200
+            result = datadir.adopt(path)
+        elif reset:
+            result = datadir.reset(overwrite)
+        else:
+            result = datadir.migrate(path, overwrite)
+    except datadir.MigrateError as exc:
+        payload = {"ok": False, "error": exc.message}
+        if exc.conflicts:
+            payload["conflicts"] = exc.conflicts
+            payload["conflictCount"] = exc.conflict_total or len(exc.conflicts)
+        return payload, (409 if exc.conflicts else 400)
+    except (IOError, OSError) as exc:
+        return {
+            "ok": False,
+            "error": ("检查失败：%s" if adopt else "迁移失败：%s") % exc,
+        }, 500
+
+    # 复制要好一会儿，这期间别的页面可能把工具启动了。那时切过去会把
+    # 正在跑的任务晾在旧实例上，所以再查一次，有就退回原目录。
+    started = running_tool_names()
+    if started:
+        restore_data_dir(old_dir)
+        return {
+            "ok": False,
+            "error": "切换期间 %s 启动了，已回到原目录；先全部停止再试"
+                     % "、".join(started),
+        }, 409
+
+    old = registry
+    try:
+        new = Registry(apppaths.data_dir(), TOOL_CLASSES)
+    except Exception as exc:
+        # 理论上不会走到这里（读坏 JSON 各工具自己会兜住），但万一：
+        # 把指针改回旧目录，别让下次启动也起不来。
+        restore_data_dir(old_dir)
+        return {"ok": False, "error": "切换后重建工具失败：%r" % exc}, 500
+
+    registry = new
+    DATA_DIR = apppaths.data_dir()
+    for tool in old.all():
+        try:
+            tool.stop_device_watch()
+        except Exception:
+            pass
+
+    result["ok"] = True
+    result["running"] = []
+    return result, 200
 
 
 # --------------------------------------------------------------------------
@@ -247,6 +374,9 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 2 and parts[1] == "tools":
             return self._send_json({"tools": registry.summaries()})
 
+        if len(parts) == 2 and parts[1] == "settings":
+            return self._send_json(settings_state())
+
         if len(parts) == 3:
             tool = registry.get(parts[1])
             if tool is None:
@@ -314,13 +444,42 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._send_text("404 Not Found", 404)
 
+    def _settings_action(self, action):
+        raw = self._read_body()
+        if raw is None:
+            return self._send_json({"ok": False, "error": "请求体太大"}, 413)
+
+        data = {}
+        if raw:
+            try:
+                decoded = json.loads(raw.decode("utf-8"))
+                if isinstance(decoded, dict):
+                    data = decoded
+            except (ValueError, UnicodeDecodeError):
+                pass
+
+        if action != "data-dir":
+            return self._send_json({"error": "没有这个设置动作: %s" % action}, 404)
+
+        payload, status = switch_data_dir(
+            data.get("path"),
+            data.get("overwrite") is True,
+            data.get("reset") is True,
+            data.get("mode") == "adopt",
+            data.get("dryRun") is True)
+        return self._send_json(payload, status)
+
     def do_POST(self):
         parsed_url = urlparse(self.path)
         parts = [p for p in parsed_url.path.split("/") if p]
 
-        # 页面自身的探针，不属于任何工具，所以要在按 tool_id 分发之前接走。
+        # 页面自身的探针和全局设置，不属于任何工具，所以在按 tool_id
+        # 分发之前接走。
         if parts[:2] == ["api", "client"] and len(parts) == 3:
             return self._client_endpoint(parts[2])
+
+        if parts[:2] == ["api", "settings"] and len(parts) == 3:
+            return self._settings_action(parts[2])
 
         if parts[:1] != ["api"] or len(parts) < 3:
             self.close_connection = True      # body 没读，这条连接不能再复用

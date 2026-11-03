@@ -19,3 +19,7 @@ config/push_file.presets.json
 
 # 运行时数据：拖进来 / 网页版选中的预设文件会复制一份到这里
 files/
+
+# 运行时数据：自定义数据目录的指针；日志目录
+data_dir.json
+logs/

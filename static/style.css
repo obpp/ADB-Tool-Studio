@@ -237,8 +237,9 @@ a { color: var(--accent); text-underline-offset: 2px; }
 #dev-status[data-tone="ok"] .conn-dot { background: var(--good); }
 #dev-status[data-tone="warn"] .conn-dot { background: var(--warning); }
 
-.sidebar-actions { display: flex; gap: 6px; }
-.sidebar-actions .btn { flex: 1; }
+/* 四个入口（全部停止 / 深色 / 使用说明 / 设置）排两行，不然 240px 放不下 */
+.sidebar-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.sidebar-actions .btn { flex: 1 1 calc(50% - 3px); }
 
 /* ---------------------------------------------------------------- 指示灯 */
 
@@ -1247,6 +1248,69 @@ input[data-tone="error"] { border-color: var(--critical); }
 .help-table td { color: var(--ink-2); }
 .help-table tr:last-child td { border-bottom: none; }
 
+/* ---------------------------------------------------------------- 设置 */
+
+/* 设置页也只有一个滚动区，内容不需要占满整个宽度 */
+.settings-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 26px 44px;
+}
+.settings-card {
+  max-width: 760px;
+  padding: 16px 18px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.settings-card + .settings-card { margin-top: 14px; }
+.settings-readout {
+  display: grid;
+  gap: 7px;
+  margin: 0 0 16px;
+}
+.settings-readout > div {
+  display: grid;
+  grid-template-columns: 116px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+}
+.settings-readout dt { font-size: 11.5px; color: var(--ink-3); }
+.settings-readout dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.settings-card .field { margin-bottom: 0; }
+.settings-form { display: grid; gap: 12px; }
+.settings-form .field-inline { display: flex; gap: 6px; align-items: center; }
+.settings-form .field-inline input { flex: 1; min-width: 0; }
+.migrate-preview {
+  padding-top: 10px;
+  border-top: 1px dashed var(--rule-2);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.migrate-preview > p { margin: 0 0 6px; }
+.migrate-preview table { width: 100%; border-collapse: collapse; }
+.migrate-preview th, .migrate-preview td {
+  padding: 3px 6px;
+  text-align: left;
+  border-bottom: 1px solid var(--rule-2);
+}
+.migrate-preview th {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+.migrate-preview td.num { font-family: var(--mono); white-space: nowrap; }
+.migrate-preview tr:last-child td { border-bottom: none; }
+.settings-card .confirm { margin-top: 14px; }
+.settings-card .confirm:last-child { margin-bottom: 0; }
+
 /* 常见问题：原生的折叠面板，不用自己写交互 */
 .faq-item {
   border: 1px solid var(--rule);
@@ -1291,15 +1355,18 @@ input[data-tone="error"] { border-color: var(--critical); }
   .sidebar-foot { padding: 12px 8px; align-items: center; }
   .conn { justify-content: center; max-width: none; }
   .conn-label, .conn-text { display: none; }
-  .sidebar-actions { flex-direction: column; width: 100%; }
-  .sidebar-actions .btn { padding: 7px 0; justify-content: center; font-size: 11px; }
+  .sidebar-actions { flex-direction: column; flex-wrap: nowrap; width: 100%; }
+  .sidebar-actions .btn { flex: 0 0 auto; padding: 7px 0; justify-content: center; font-size: 11px; }
   /* 图标条里放不下四个字，换成字形；完整说法留在 aria-label / title 上 */
-  #stop-all, #theme, #help { font-size: 0; }
-  #stop-all::after, #theme::after, #help::after { font-size: 12px; line-height: 1; }
+  #stop-all, #theme, #help, #settings { font-size: 0; }
+  #stop-all::after, #theme::after, #help::after, #settings::after {
+    font-size: 12px; line-height: 1;
+  }
   #stop-all::after { content: '■'; }
   #theme::after { content: '◐'; }
   #help::after { content: '?'; }
-  .help-scroll { padding-left: 18px; padding-right: 18px; }
+  #settings::after { content: '⚙'; }
+  .help-scroll, .settings-scroll { padding-left: 18px; padding-right: 18px; }
   .workspace { grid-template-columns: 300px minmax(0, 1fr); gap: 20px; padding: 16px 18px 20px; }
   .nameplate, .cmdbar { padding-left: 18px; padding-right: 18px; }
   .rule { margin: 0 18px; }

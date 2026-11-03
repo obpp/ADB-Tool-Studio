@@ -86,7 +86,7 @@ window.SHELL = (function () {
     theme.setAttribute('aria-label', '切换浅色 / 深色主题');
     actions.appendChild(theme);
 
-    // 说明页不在工具列表里，它是「怎么用」，不是「能跑什么」
+    // 说明页和设置页都不在工具列表里：一个讲「怎么用」，一个定数据存哪
     var help = el('a', 'btn ghost small', '使用说明');
     help.id = 'help';
     help.href = '/help';
@@ -94,6 +94,14 @@ window.SHELL = (function () {
     help.setAttribute('aria-label', '使用说明');
     if (activeId === 'help') help.setAttribute('aria-current', 'page');
     actions.appendChild(help);
+
+    var settings = el('a', 'btn ghost small', '设置');
+    settings.id = 'settings';
+    settings.href = '/settings';
+    settings.title = '选择配置、脚本、预设文件和日志保存在哪里';
+    settings.setAttribute('aria-label', '设置');
+    if (activeId === 'settings') settings.setAttribute('aria-current', 'page');
+    actions.appendChild(settings);
 
     aside.appendChild(foot);
 
