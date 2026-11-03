@@ -210,7 +210,14 @@ window.ADB = (function () {
 
     this._allChip = this._chip('全部', null);
     this._allChip.addEventListener('click', function () {
-      for (var i = 0; i < LEVELS.length; i++) self._hidden[LEVELS[i]] = false;
+      // 反选：还有类型藏着就全部打开；已经全开就全部关掉
+      var allOn = true;
+      for (var i = 0; i < LEVELS.length; i++) {
+        if (self._hidden[LEVELS[i]]) allOn = false;
+      }
+      for (var j = 0; j < LEVELS.length; j++) {
+        self._hidden[LEVELS[j]] = allOn;
+      }
       self._saveFilters();
       self._applyFilters();
     });
@@ -259,6 +266,7 @@ window.ADB = (function () {
     }
     if (this._allChip) {
       this._allChip.setAttribute('aria-pressed', allOn ? 'true' : 'false');
+      this._allChip.title = allOn ? '隐藏全部类型' : '显示全部类型';
       this._allChip.querySelector('.log-chip-name').textContent =
         allOn ? '全部' : '全选';
       setCount(this._allChip.querySelector('.n'), this._total);
