@@ -30,7 +30,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import apppaths
+import connection
 import datadir
+import sshkit
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = apppaths.static_dir()     # 打包后躺在 sys._MEIPASS 里
@@ -89,6 +91,51 @@ def settings_state():
     payload["ok"] = True
     payload["running"] = running_tool_names()
     return payload
+
+
+# --------------------------------------------------------------------------
+# 全局连接方式（ADB / SSH）
+# --------------------------------------------------------------------------
+
+def connection_state():
+    """给前端用的连接状态：模式 + SSH 参数 + 在线情况。"""
+    info = connection.current().info()
+    if info["mode"] == connection.MODE_ADB:
+        # ADB 没有进程级监听器，用各工具手里最新的设备列表凑
+        count = 0
+        for tool in registry.all():
+            devices = getattr(tool, "devices", None) or []
+            count = max(count, len([d for d in devices
+                                    if d.get("state") == "device"]))
+        info["deviceCount"] = count
+        info["online"] = count > 0
+    return info
+
+
+def tool_summaries():
+    """侧边栏用的工具列表；SSH 模式下 always-adb 不适用，直接藏掉。"""
+    summaries = registry.summaries()
+    if connection.current().mode() == connection.MODE_SSH:
+        summaries = [s for s in summaries if s.get("id") != "always_adb"]
+    return summaries
+
+
+def apply_connection_change():
+    """切换连接方式后，让所有工具的设备监听和显示跟着换。"""
+    mon = connection.monitor()
+    mon.reset()
+    tools = registry.all()
+    for tool in tools:
+        try:
+            tool.stop_device_watch()
+            tool.reset_devices()
+        except Exception:
+            pass
+    if connection.current().mode() == connection.MODE_SSH:
+        for tool in tools:
+            if tool.id != "always_adb" and hasattr(tool, "refresh_devices"):
+                mon.register(tool)
+        mon.start()
 
 
 def restore_data_dir(old_dir):
@@ -186,6 +233,9 @@ def _switch_data_dir(path, overwrite=False, reset=False, adopt=False, dry_run=Fa
             tool.stop_device_watch()
         except Exception:
             pass
+    # 连接配置也跟着数据目录走，旧目录的 SSH 监听不能留着
+    connection.reload(DATA_DIR)
+    apply_connection_change()
 
     result["ok"] = True
     result["running"] = []
@@ -353,13 +403,14 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         parts = [p for p in path.split("/") if p]
 
-        # 首页 = 第一个注册的工具。没有总览页了，打开就直接进一个通道，
-        # 免得先看一眼空目录再点一下。
+        # 首页 = 当前模式下侧边栏的第一个工具。没有总览页了，打开就直接进
+        # 一个通道，免得先看一眼空目录再点一下。按 tool_summaries 取而不是
+        # registry.all：SSH 模式下 always-adb 被藏掉，落点应该是脚本执行。
         if path in ("/", "/index.html"):
-            tools = registry.all()
-            if not tools:
+            summaries = tool_summaries()
+            if not summaries:
                 return self._send_text("没有注册任何工具", 500)
-            return self._serve_static(tools[0].page + ".html")
+            return self._serve_static(summaries[0]["page"] + ".html")
 
         if parts[:1] == ["static"]:
             return self._serve_static("/".join(parts[1:]))
@@ -372,7 +423,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_text("404 Not Found", 404)
 
         if len(parts) == 2 and parts[1] == "tools":
-            return self._send_json({"tools": registry.summaries()})
+            return self._send_json({
+                "tools": tool_summaries(),
+                "connection": connection_state(),
+            })
+
+        if len(parts) == 2 and parts[1] == "connection":
+            return self._send_json({
+                "ok": True,
+                "connection": connection_state(),
+                "config": connection.current().get(),
+                "running": running_tool_names(),
+            })
 
         if len(parts) == 2 and parts[1] == "settings":
             return self._send_json(settings_state())
@@ -444,6 +506,60 @@ class Handler(BaseHTTPRequestHandler):
 
         return self._send_text("404 Not Found", 404)
 
+    def _connection_action(self, parts):
+        """POST /api/connection（保存）与 /api/connection/test（试连）。"""
+        raw = self._read_body()
+        if raw is None:
+            return self._send_json({"ok": False, "error": "请求体太大"}, 413)
+
+        data = {}
+        if raw:
+            try:
+                decoded = json.loads(raw.decode("utf-8"))
+                if isinstance(decoded, dict):
+                    data = decoded
+            except (ValueError, UnicodeDecodeError):
+                pass
+
+        if len(parts) == 3 and parts[2] == "test":
+            ssh_raw = data.get("ssh") or {}
+            try:
+                merged = connection.current().validate(
+                    {"mode": "ssh", "ssh": ssh_raw})
+            except connection.ConfigError as exc:
+                return self._send_json({"ok": False, "error": str(exc)}, 400)
+            devices, err = sshkit.probe(merged["ssh"])
+            online = bool(devices) and not err
+            model = devices[0].get("model", "") if devices else ""
+            return self._send_json({
+                "ok": online, "online": online, "model": model, "error": err,
+            })
+
+        if len(parts) != 2:
+            return self._send_json({"error": "没有这个连接动作"}, 404)
+
+        running = running_tool_names()
+        if running:
+            return self._send_json({
+                "ok": False,
+                "error": "%s 正在运行，先全部停止再切换" % "、".join(running),
+            }, 409)
+
+        try:
+            saved = connection.current().save(data)
+        except connection.ConfigError as exc:
+            return self._send_json({"ok": False, "error": str(exc)}, 400)
+        except (IOError, OSError) as exc:
+            return self._send_json(
+                {"ok": False, "error": "保存连接配置失败：%s" % exc}, 500)
+
+        apply_connection_change()
+        return self._send_json({
+            "ok": True,
+            "connection": connection_state(),
+            "config": saved,
+        })
+
     def _settings_action(self, action):
         raw = self._read_body()
         if raw is None:
@@ -480,6 +596,9 @@ class Handler(BaseHTTPRequestHandler):
 
         if parts[:2] == ["api", "settings"] and len(parts) == 3:
             return self._settings_action(parts[2])
+
+        if parts[:2] == ["api", "connection"] and len(parts) <= 3:
+            return self._connection_action(parts)
 
         if parts[:1] != ["api"] or len(parts) < 3:
             self.close_connection = True      # body 没读，这条连接不能再复用
@@ -526,6 +645,10 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
         if action == "start":
+            if (tool.id == "always_adb"
+                    and connection.current().mode() == connection.MODE_SSH):
+                return self._send_json(
+                    {"ok": False, "error": "本功能仅支持 ADB，切回 ADB 后可用"}, 400)
             ok, msg = tool.start(data)
             return self._send_json(
                 {"ok": ok, "message": msg, "state": tool.snapshot()},
@@ -631,9 +754,16 @@ class AppServer(object):
         self.thread = threading.Thread(target=self.httpd.serve_forever, name="http")
         self.thread.daemon = True
         self.thread.start()
+        apply_connection_change()      # SSH 模式下把进程级监听拉起来
         return self
 
     def stop(self):
+        mon = connection.peek_monitor()
+        if mon is not None:
+            try:
+                mon.reset()                # 先停探测线程，免得它去推已停的工具
+            except Exception:
+                pass
         for tool in registry.all():
             try:
                 stop_watch = getattr(tool, "stop_device_watch", None)

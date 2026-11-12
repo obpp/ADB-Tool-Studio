@@ -26,6 +26,8 @@
       <!-- 功能简述：内容由 shell.js 从 /api/tools 的 desc 填进来 -->
       <p class="nameplate-desc" id="tool-desc"></p>
 
+      <p id="adb-only-notice" class="hint" data-tone="error" hidden>本功能仅支持 ADB，切回 ADB 后可用。</p>
+
       <div class="readout" role="group" aria-label="运行统计">
         <span class="ro"><span class="ro-k">目标设备</span><span class="ro-v" id="meta-target">—</span></span>
         <span class="ro"><span class="ro-k">模式</span><span class="ro-v" id="meta-mode">—</span></span>
@@ -128,6 +130,7 @@
 
 <script src="/static/common.js"></script>
 <script src="/static/shell.js"></script>
+<script src="/static/connection.js"></script>
 <script src="/static/always-adb.js"></script>
 </body>
 </html>

@@ -31,6 +31,51 @@
 
     <div class="settings-scroll">
 
+      <section class="settings-card" id="conn-card" aria-labelledby="conn-title">
+        <h2 class="help-h2" id="conn-title">连接方式</h2>
+        <p class="hint">所有功能共用这里的选择。切到 SSH 后，脚本执行、替换镜像、推送文件和反向隧道都走 SSH；切回 ADB 后行为与以前一致。</p>
+        <div class="mode-tabs" role="tablist" aria-label="连接方式">
+          <button class="mode-tab" id="conn-mode-adb" type="button" role="tab" aria-selected="true">ADB</button>
+          <button class="mode-tab" id="conn-mode-ssh" type="button" role="tab" aria-selected="false">SSH</button>
+        </div>
+        <div class="mode-panel" id="conn-panel-adb">
+          <p class="hint">设备的序列号和 adb 路径仍在各功能页选择。这里的检测只表示后端能不能列出设备。</p>
+        </div>
+        <div class="mode-panel" id="conn-panel-ssh" hidden>
+          <div class="config-grid">
+            <label class="field span-2"><span class="field-label">地址</span>
+              <input id="conn-host" type="text" autocomplete="off" spellcheck="false" placeholder="192.168.100.1"></label>
+            <label class="field"><span class="field-label">端口</span>
+              <input id="conn-port" type="number" min="1" max="65535" step="1"></label>
+            <label class="field"><span class="field-label">用户名</span>
+              <input id="conn-user" type="text" autocomplete="off" spellcheck="false" placeholder="root"></label>
+            <label class="field span-2"><span class="field-label">密钥文件</span>
+              <span class="field-inline"><input id="conn-key" type="text" autocomplete="off" spellcheck="false" placeholder="留空则用 ssh-agent 和默认密钥">
+                <button id="btn-conn-key" class="btn ghost" type="button">浏览…</button></span></label>
+            <label class="field"><span class="field-label">主机密钥策略</span>
+              <select id="conn-policy">
+                <option value="accept-new">自动接受新的</option>
+                <option value="yes">必须已存在</option>
+                <option value="no">不校验</option>
+              </select></label>
+          </div>
+          <details id="conn-advanced"><summary>高级</summary>
+            <div class="config-grid">
+              <label class="field"><span class="field-label">连接超时（秒）</span>
+                <input id="conn-timeout" type="number" min="1" max="60" step="1"></label>
+              <label class="field span-2"><span class="field-label">remount 命令</span>
+                <input id="conn-remount" type="text" autocomplete="off" spellcheck="false"></label>
+            </div>
+          </details>
+        </div>
+        <p id="conn-status" class="form-status" role="status"></p>
+        <div class="form-actions">
+          <button id="btn-conn-test" class="btn ghost" type="button">测试连接</button>
+          <button id="btn-conn-save" class="btn primary" type="button">保存并应用</button>
+        </div>
+        <p id="conn-running" class="hint" data-tone="error" hidden></p>
+      </section>
+
       <section class="settings-card" aria-labelledby="dir-title">
         <h2 class="help-h2" id="dir-title">数据目录</h2>
 
@@ -139,6 +184,7 @@
 
 <script src="/static/common.js"></script>
 <script src="/static/shell.js"></script>
+<script src="/static/connection.js"></script>
 <script src="/static/settings.js"></script>
 </body>
 </html>

@@ -4,6 +4,7 @@
 
   var ADB = window.ADB;
   var $ = ADB.$;
+  var CONNECTION = window.CONNECTION;
 
   var DEVICE_STATE = {
     'device': '已连接', 'unauthorized': '未授权', 'offline': '离线',
@@ -63,6 +64,12 @@
     selectedId = extra.selected || '';
     runningId = extra.runningId || '';
     lastBrowseDir = extra.lastBrowseDir || lastBrowseDir;
+
+    // 工具状态里带着连接方式：切到 SSH 会立刻和侧边栏一起换过来
+    if (s.connection) {
+      CONNECTION.update(s.connection);
+      CONNECTION.applyToolPage(s.connection);
+    }
 
     var override = null;
     if (s.status === 'idle' && stats.lastExitCode) {
@@ -130,6 +137,11 @@
 
   function updateTargetLabel() {
     var el = $('#meta-target');
+    // SSH 模式没有 adb 序列号：显示隧道目标
+    if (CONNECTION.isSsh()) {
+      el.textContent = CONNECTION.targetText() || 'SSH';
+      return;
+    }
     var cfg = state && state.config;
     if (!cfg) { el.textContent = '—'; return; }
     if (cfg.serial) { el.textContent = cfg.serial; return; }
@@ -1070,21 +1082,27 @@
   var form = $('#config-form');
 
   function collectConfig() {
-    return {
-      adbPath: $('#cfg-adb').value.trim(),
-      serial: $('#cfg-serial').value,
+    var cfg = {
       pushDir: dirInput.value.trim(),
       remount: $('#cfg-remount').checked
     };
+    // SSH 模式页面上没有这两个字段，别用空值覆盖已保存的设备
+    if (!CONNECTION.isSsh()) {
+      cfg.adbPath = $('#cfg-adb').value.trim();
+      cfg.serial = $('#cfg-serial').value;
+    }
+    return cfg;
   }
 
   function applyConfig(cfg, force) {
     if (!cfg) return;
     if (cfgDirty && !force) return;
-    $('#cfg-adb').value = cfg.adbPath || '';
+    if (!CONNECTION.isSsh()) {
+      $('#cfg-adb').value = cfg.adbPath || '';
+      fillSerialOptions(cfg.serial || '');
+    }
     dirInput.value = cfg.pushDir || '';
     $('#cfg-remount').checked = !!cfg.remount;
-    fillSerialOptions(cfg.serial || '');
     cfgDirty = false;
   }
 
@@ -1216,6 +1234,11 @@
   /* ---------------- 启动 ---------------- */
 
   setMode(mode, true);
+  CONNECTION.load().then(function (info) {
+    CONNECTION.applyToolPage(info);
+    updateTargetLabel();
+  }).catch(function () { /* 读不到连接方式就按 ADB 显示 */ });
+
   refreshDevices();
   setInterval(function () {
     if (!state || state.status === 'idle') refreshDevices();

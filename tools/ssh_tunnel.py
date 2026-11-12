@@ -1,22 +1,30 @@
 # -*- coding: utf-8 -*-
-"""adb 反向隧道：把本机 adb server 反向映射到远程主机。
+"""反向隧道：把本地目标反向映射到远程主机。
 
-等价于这条命令：
+ADB 模式等价于：
 
     ssh -R 5037:127.0.0.1:5037 -N user@host
 
-隧道建立后，在远程主机上直接敲 `adb devices` 就能看到接在本机的设备
-（远程的 adb 客户端默认就连 127.0.0.1:5037）。
+远程主机上直接敲 `adb devices` 就能看到接在本机的设备（远程的 adb 客户端
+默认就连 127.0.0.1:5037）。
+
+SSH 模式把开发板的 22 端口映射到远程主机：
+
+    ssh -R 2222:<开发板地址>:22 -N <远程用户>@<远程主机>
+
+远程主机和远程用户都取自设置页的 SSH 连接（开发板地址），远程主机 / 用户
+留空时用连接设置里的值，不存在任何内置的个人机器或账号默认值。
 """
 
 import os
 import re
-import shutil
 import subprocess
 import threading
 import time
 
+import connection
 import spawn
+from sshkit import HINTS, is_teardown_noise, resolve_ssh
 from toolbase import (Tool, STATUS_RUNNING, STATUS_RECONNECTING,
                       as_bool, as_enum, as_int, as_num, as_str, shell_join)
 
@@ -24,6 +32,19 @@ HOST_KEY_POLICIES = ("accept-new", "yes", "no")
 
 # 远程 adb 客户端默认就连 5037；远程绑定端口换成别的，服务端必须设这个环境变量
 DEFAULT_REMOTE_PORT = 5037
+
+# 两套本地目标：ADB 转发的是本机 adb server，SSH 转发的是开发板的 22 端口。
+# SSH 组的 localHost 留空 = 用连接设置里的开发板地址。
+DEFAULT_TARGETS = {
+    "adb": {"remotePort": 5037, "localHost": "127.0.0.1", "localPort": 5037},
+    "ssh": {"remotePort": 2222, "localHost": "", "localPort": 22},
+}
+
+
+def default_targets():
+    return {"adb": dict(DEFAULT_TARGETS["adb"]),
+            "ssh": dict(DEFAULT_TARGETS["ssh"])}
+
 
 # OpenSSH 绑定失败时的原文：
 #   Warning: remote port forwarding failed for listen port 5037
@@ -47,88 +68,18 @@ def suggest_port(port):
     return port - 1
 
 
-# ssh 的常见报错 -> 一句人话提示（每条只提示一次，别刷屏）
-HINTS = (
-    ("permission denied",
-     "认证被拒绝：确认远程 ~/.ssh/authorized_keys 里有本机公钥，或本机已 ssh-add 加载密钥"),
-    ("host key verification failed",
-     "主机指纹校验失败：把「主机指纹」改成「自动接受新的」，或先手动 ssh 一次写入 known_hosts"),
-    ("address already in use",
-     "端口已被占用：远程该端口上已经有别的进程在监听"),
-    ("connection refused",
-     "连接被拒绝：主机名或端口不对，或者远程 sshd 没在运行"),
-    ("connection timed out",
-     "连接超时：网络不通，或被防火墙拦了"),
-    ("no route to host", "网络不可达：检查 IP 和路由"),
-    ("could not resolve hostname", "域名解析失败：主机名写错了吧"),
-    ("connection closed by", "连接被远程关闭：可能是密钥被拒，或远程 sshd 有限制"),
-    ("too many authentication failures", "认证失败次数过多：用 -i 指定密钥，并加上 IdentitiesOnly"),
-)
-
-
-def resolve_ssh():
-    """找一个能用的 ssh 客户端（Windows 10+ 自带 OpenSSH）。"""
-    candidates = ["ssh", "ssh.exe",
-                  "C:\\Windows\\System32\\OpenSSH\\ssh.exe",
-                  "/usr/bin/ssh", "/usr/local/bin/ssh"]
-    for cand in candidates:
-        found = shutil.which(cand)
-        if found:
-            return found
-        if ("/" in cand or "\\" in cand) and os.path.isfile(cand):
-            return cand
-    return "ssh"
-
-
-def build_ssh_command(cfg):
-    """按配置拼出 ssh 命令行（list 形式，直接交给 subprocess）。"""
-    host = cfg["host"]
-    user = cfg["user"]
-    target = ("%s@%s" % (user, host)) if user else host
-
-    if cfg["gatewayPorts"]:
-        spec = "0.0.0.0:%d:%s:%d" % (cfg["remotePort"], cfg["localHost"], cfg["localPort"])
-    else:
-        # 不写绑定地址时，远程只在 loopback 上监听（更安全，也是 ssh 的默认）
-        spec = "%d:%s:%d" % (cfg["remotePort"], cfg["localHost"], cfg["localPort"])
-
-    cmd = [cfg["sshPath"], "-N",
-           "-p", str(cfg["sshPort"]),
-           "-R", spec,
-           "-o", "ExitOnForwardFailure=yes",
-           "-o", "StrictHostKeyChecking=" + cfg["hostKeyPolicy"]]
-
-    if cfg["keepAlive"]:
-        cmd += ["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"]
-    if cfg["batchMode"]:
-        # 没有终端，密码认证没法交互，直接快速失败而不是傻等
-        cmd += ["-o", "BatchMode=yes"]
-    if cfg["identityFile"]:
-        cmd += ["-i", cfg["identityFile"], "-o", "IdentitiesOnly=yes"]
-
-    cmd.append(target)
-    return cmd
-
-
-def display_command(cfg):
-    """给人看、给「复制」用的命令行。
-
-    主机还没填的时候把末尾的目标换成占位符 —— 否则预览里是一条
-    以空参数结尾的命令，复制出去还得自己看出哪里不对。
-    """
-    cmd = build_ssh_command(cfg)
-    if not cfg["host"]:
-        cmd[-1] = ("%s@host" % cfg["user"]) if cfg["user"] else "host"
-    return cmd
-
-
 class SshTunnelTool(Tool):
 
     id = "ssh_tunnel"
-    name = "adb 反向隧道"
-    desc = "把本机 adb server 反向映射到远程主机，远程即可直接操作接在本机的设备"
+    name = "反向隧道"
     page = "ssh-tunnel"
     icon = "⇄"
+
+    @property
+    def desc(self):
+        if connection.current(self.app_dir).mode() == connection.MODE_SSH:
+            return "把开发板的 SSH 反向映射到远程主机"
+        return "把本机 adb server 反向映射到远程主机，远程即可直接操作接在本机的设备"
 
     def __init__(self, app_dir):
         Tool.__init__(self, app_dir)
@@ -151,9 +102,8 @@ class SshTunnelTool(Tool):
             "hostKeyPolicy": "accept-new",
             "keepAlive": True,
             "batchMode": True,
-            "remotePort": 5037,
-            "localHost": "127.0.0.1",
-            "localPort": 5037,
+            # 两套本地目标按连接方式分开存；旧配置里的顶层三字段会自动迁过来
+            "targets": default_targets(),
             "gatewayPorts": False,
             "autoReconnect": True,
             "reconnectInterval": 3.0,
@@ -165,6 +115,44 @@ class SshTunnelTool(Tool):
     def sanitize_config(self, raw, base=None):
         base = dict(base) if isinstance(base, dict) else self.default_config()
         raw = raw if isinstance(raw, dict) else {}
+
+        base_targets = base.get("targets")
+        if not isinstance(base_targets, dict):
+            base_targets = default_targets()
+
+        raw_targets = raw.get("targets")
+        if not isinstance(raw_targets, dict):
+            raw_targets = {}
+            # 旧配置：顶层的 remotePort/localHost/localPort 属于 adb 模式
+            legacy = {}
+            for key in ("remotePort", "localHost", "localPort"):
+                if key in raw:
+                    legacy[key] = raw[key]
+            if legacy:
+                raw_targets = {"adb": legacy}
+
+        targets = {}
+        for mode in ("adb", "ssh"):
+            defaults = DEFAULT_TARGETS[mode]
+            saved = base_targets.get(mode)
+            if not isinstance(saved, dict):
+                saved = defaults
+            raw_group = raw_targets.get(mode)
+            if not isinstance(raw_group, dict):
+                raw_group = {}
+            # ADB 的 localHost 不能为空；SSH 留空表示「用连接设置里的开发板地址」
+            targets[mode] = {
+                "remotePort": as_int(raw_group, "remotePort",
+                                     saved.get("remotePort", defaults["remotePort"]),
+                                     1, 65535),
+                "localHost": as_str(raw_group, "localHost",
+                                    saved.get("localHost", defaults["localHost"]),
+                                    nonempty=(mode == "adb")),
+                "localPort": as_int(raw_group, "localPort",
+                                    saved.get("localPort", defaults["localPort"]),
+                                    1, 65535),
+            }
+
         return {
             "sshPath": as_str(raw, "sshPath", base["sshPath"], nonempty=True),
             "host": as_str(raw, "host", base["host"]),
@@ -174,9 +162,7 @@ class SshTunnelTool(Tool):
             "hostKeyPolicy": as_enum(raw, "hostKeyPolicy", base["hostKeyPolicy"], HOST_KEY_POLICIES),
             "keepAlive": as_bool(raw, "keepAlive", base["keepAlive"]),
             "batchMode": as_bool(raw, "batchMode", base["batchMode"]),
-            "remotePort": as_int(raw, "remotePort", base["remotePort"], 1, 65535),
-            "localHost": as_str(raw, "localHost", base["localHost"], nonempty=True),
-            "localPort": as_int(raw, "localPort", base["localPort"], 1, 65535),
+            "targets": targets,
             "gatewayPorts": as_bool(raw, "gatewayPorts", base["gatewayPorts"]),
             "autoReconnect": as_bool(raw, "autoReconnect", base["autoReconnect"]),
             "reconnectInterval": as_num(raw, "reconnectInterval", base["reconnectInterval"], 0.5, 3600.0),
@@ -195,13 +181,75 @@ class SshTunnelTool(Tool):
 
     # ---------------- 状态 ----------------
 
+    def active_target(self, cfg=None):
+        """按当前连接方式选一组本地目标。
+
+        SSH 组的 localHost 留空时用连接设置里的开发板地址 —— 页面只让填
+        远端参数，开发板地址已经在设置里填过一次了。
+        """
+        cfg = cfg if isinstance(cfg, dict) else self.config
+        conn = connection.current(self.app_dir)
+        mode = conn.mode()
+        targets = cfg.get("targets")
+        target = targets.get(mode) if isinstance(targets, dict) else None
+        if not isinstance(target, dict):
+            target = dict(DEFAULT_TARGETS.get(mode, DEFAULT_TARGETS["adb"]))
+        target = dict(target)
+        if mode == connection.MODE_SSH and not target.get("localHost"):
+            target["localHost"] = conn.ssh()["host"]
+        return target
+
+    def build_ssh_command(self, cfg):
+        """按配置拼出 ssh 命令行（list 形式，直接交给 subprocess）。"""
+        host = cfg["host"]
+        user = cfg["user"]
+        target = ("%s@%s" % (user, host)) if user else host
+        local = self.active_target(cfg)
+
+        if cfg["gatewayPorts"]:
+            spec = "0.0.0.0:%d:%s:%d" % (local["remotePort"], local["localHost"],
+                                          local["localPort"])
+        else:
+            # 不写绑定地址时，远程只在 loopback 上监听（更安全，也是 ssh 的默认）
+            spec = "%d:%s:%d" % (local["remotePort"], local["localHost"],
+                                 local["localPort"])
+
+        cmd = [cfg["sshPath"], "-N",
+               "-p", str(cfg["sshPort"]),
+               "-R", spec,
+               "-o", "ExitOnForwardFailure=yes",
+               "-o", "StrictHostKeyChecking=" + cfg["hostKeyPolicy"]]
+
+        if cfg["keepAlive"]:
+            cmd += ["-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3"]
+        if cfg["batchMode"]:
+            # 没有终端，密码认证没法交互，直接快速失败而不是傻等
+            cmd += ["-o", "BatchMode=yes"]
+        if cfg["identityFile"]:
+            cmd += ["-i", cfg["identityFile"], "-o", "IdentitiesOnly=yes"]
+
+        cmd.append(target)
+        return cmd
+
+    def display_command(self, cfg):
+        """给人看、给「复制」用的命令行。
+
+        主机还没填的时候把末尾的目标换成占位符 —— 否则预览里是一条
+        以空参数结尾的命令，复制出去还得自己看出哪里不对。
+        """
+        cmd = self.build_ssh_command(cfg)
+        if not cfg["host"]:
+            cmd[-1] = ("%s@host" % cfg["user"]) if cfg["user"] else "host"
+        return cmd
+
     def remote_spec(self, cfg=None):
         cfg = cfg or self.config
-        return "%s:%d" % (cfg["host"], cfg["remotePort"])
+        return "%s:%d" % (cfg["host"], self.active_target(cfg)["remotePort"])
 
     def local_spec(self, cfg=None):
         cfg = cfg or self.config
-        return "%s:%d" % (cfg["localHost"], cfg["localPort"])
+        local = self.active_target(cfg)
+        return "%s:%d" % (local["localHost"], local["localPort"])
 
     def connected(self):
         proc = self.process
@@ -210,12 +258,15 @@ class SshTunnelTool(Tool):
 
     def extra(self):
         cfg = self.config
+        conn = connection.current(self.app_dir)
         return {
             "remoteSpec": self.remote_spec(cfg),
             "localSpec": self.local_spec(cfg),
             "target": ("%s@%s" % (cfg["user"], cfg["host"])) if cfg["user"] else cfg["host"],
             "connected": self.connected(),
-            "command": shell_join(display_command(cfg)),
+            "command": shell_join(self.display_command(cfg)),
+            "mode": conn.mode(),
+            "modeName": "SSH" if conn.mode() == connection.MODE_SSH else "ADB",
             # 最近一次绑定失败的端口（页面据此把端口提示标红）
             "blockedPort": self._blocked_port,
         }
@@ -232,7 +283,7 @@ class SshTunnelTool(Tool):
     def preview(self, params):
         """POST /api/ssh_tunnel/preview：把页面上的当前参数变成一条命令行。"""
         merged = self.sanitize_config(params, base=self.config)
-        cmd = display_command(merged)
+        cmd = self.display_command(merged)
         warn = ""
         if not merged["host"]:
             warn = "还没有填远程主机"
@@ -265,6 +316,10 @@ class SshTunnelTool(Tool):
             self.log("err", "还没填远程主机，先在上面填上远程机器的 IP 或域名")
             return
 
+        # 模式在启动时定下；运行中后端不允许切换连接方式
+        target = self.active_target(cfg)
+        ssh_mode = (connection.current(self.app_dir).mode() == connection.MODE_SSH)
+
         while not self.stop_event.is_set():
             if delay:
                 self.log("info", "%.1f 秒后重连..." % delay)
@@ -273,7 +328,7 @@ class SshTunnelTool(Tool):
                     return
                 delay = 0.0
 
-            cmd = build_ssh_command(cfg)
+            cmd = self.build_ssh_command(cfg)
             self.log("cmd", "$ " + shell_join(cmd))
 
             try:
@@ -302,14 +357,18 @@ class SshTunnelTool(Tool):
             self.set_status(STATUS_RUNNING)
             self.log("ok", "ssh 已启动（pid %s）：%s → %s"
                      % (proc.pid, self.remote_spec(cfg), self.local_spec(cfg)))
-            self.log("info", "现在在 %s 上直接敲 `adb devices`，就能看到接在这台机器上的设备"
-                     % cfg["host"])
+            if ssh_mode:
+                self.log("info", "在 %s 上用 ssh 连 127.0.0.1:%d 就能连到开发板"
+                         % (cfg["host"], target["remotePort"]))
+            else:
+                self.log("info", "现在在 %s 上直接敲 `adb devices`，就能看到接在这台机器上的设备"
+                         % cfg["host"])
 
             reader = threading.Thread(target=self._pump, args=(proc,), name="ssh-out")
             reader.daemon = True
             reader.start()
 
-            hint = threading.Thread(target=self._hint_when_up, args=(proc, cfg),
+            hint = threading.Thread(target=self._hint_when_up, args=(proc, target, ssh_mode),
                                     name="ssh-hint")
             hint.daemon = True
             hint.start()
@@ -345,7 +404,7 @@ class SshTunnelTool(Tool):
         try:
             for line in iter(proc.stdout.readline, ""):
                 line = line.rstrip("\r\n")
-                if not line:
+                if not line or is_teardown_noise(line):
                     continue
                 self.log("info", line)
 
@@ -378,11 +437,12 @@ class SshTunnelTool(Tool):
                  % port)
         self.log("warn", "把「远程绑定端口」改成别的端口（比如 %d），保存后重新点启动。"
                  % suggest)
-        self.log("warn", "换好后在服务端 ~/.bashrc 里加：%s" % env_command(suggest))
+        if connection.current(self.app_dir).mode() == connection.MODE_ADB:
+            self.log("warn", "换好后在服务端 ~/.bashrc 里加：%s" % env_command(suggest))
         if self.config.get("gatewayPorts"):
             self.log("warn", "如果勾了「绑定到 0.0.0.0」，也可能服务端 sshd 没开 GatewayPorts —— 先取消勾选再试。")
 
-    def _hint_when_up(self, proc, cfg):
+    def _hint_when_up(self, proc, target, ssh_mode):
         """进程活过 UP_HINT_DELAY 还没退出，就认为连上了，补一句服务端要做什么。
 
         判断是启发式的：ssh 的 -N 成功时不打印任何东西，没有可靠的「已建立」信号。
@@ -395,13 +455,14 @@ class SshTunnelTool(Tool):
         with self.lock:
             if self.process is not proc:
                 return
-            port = cfg["remotePort"]
+            port = target["remotePort"]
             # 这一轮端口是好的，之前被占用的红字可以摘掉了
             self._blocked_port = None
             first = port not in self._hinted_ports
             self._hinted_ports.add(port)
         self.publish_state()
-        if not first:
+        if not first or ssh_mode:
+            # SSH 模式转发的是开发板的 22，服务端不需要 adb 环境变量
             return
 
         if port == DEFAULT_REMOTE_PORT:

@@ -26,6 +26,7 @@
       <nav class="help-toc" aria-label="本页目录">
         <a href="#features">全部功能</a>
         <a href="#common">通用设置</a>
+        <a href="#ssh">SSH 连接</a>
         <a href="#faq">常见问题</a>
       </nav>
     </header>
@@ -137,6 +138,29 @@
         </div>
       </section>
 
+      <section class="help-section" id="ssh">
+        <h2 class="help-h2">SSH 连接</h2>
+        <p class="help-note">设置页顶部的连接方式切到 SSH 后，脚本执行、替换镜像、推送文件和反向隧道都改走 SSH。</p>
+        <div class="help-grid">
+          <article class="help-card">
+            <h3>前提</h3>
+            <ul>
+              <li>开发板能用密钥免密登录，本机已把公钥放进开发板的 authorized_keys，或已 ssh-add</li>
+              <li>登录用户是 root；SSH 模式不再执行 adb root</li>
+              <li>软件固定带 BatchMode=yes，不会停在密码提示上</li>
+            </ul>
+          </article>
+          <article class="help-card">
+            <h3>隧道与主机密钥</h3>
+            <ul>
+              <li>反向隧道默认只绑远端 loopback，远端 sshd 的 GatewayPorts 保持关闭</li>
+              <li>主机密钥默认 accept-new：第一次记录，之后变化会报错</li>
+              <li>SSH 登录是 root，开发板的 SSH 暴露面要自己控制</li>
+            </ul>
+          </article>
+        </div>
+      </section>
+
       <section class="help-section" id="faq">
         <h2 class="help-h2">常见问题</h2>
 
@@ -202,6 +226,7 @@
 
 <script src="/static/common.js"></script>
 <script src="/static/shell.js"></script>
+<script src="/static/connection.js"></script>
 <script src="/static/help.js"></script>
 </body>
 </html>

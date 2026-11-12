@@ -34,8 +34,10 @@ import threading
 import time
 
 import adbkit
-import spawn
-from toolbase import Tool, as_num, as_str, shell_join
+import connection
+import sshkit
+import transport
+from toolbase import Tool, as_num, as_str
 
 # 短命令（test / wc / blockdev）的超时。这些命令要么秒回，要么卡住了。
 CHECK_TIMEOUT = 15.0
@@ -350,8 +352,7 @@ class ReplaceImageTool(Tool):
     # ---------------- 设备 ----------------
 
     def refresh_devices(self):
-        cfg = self.config
-        devices, err = adbkit.list_devices(cfg["adbPath"], cfg["serial"], 10.0)
+        devices, err = transport.make(self).devices(10.0)
         with self.lock:
             self.devices = devices
             self.devices_error = err
@@ -360,7 +361,7 @@ class ReplaceImageTool(Tool):
 
     def _resolve_serial(self, devices):
         """确定这次写哪台设备。返回 (serial, 错误说明)。"""
-        serial, err = adbkit.pick_serial(
+        serial, err = transport.make(self).select(
             devices, self.config["serial"], self.devices_error)
         if not serial:
             return "", err
@@ -716,14 +717,17 @@ class ReplaceImageTool(Tool):
 
         # ---- 闸一/二：所有目标先验一遍，任何一项不过就一条 dd 都不发 ----
         # A/B 分区尤其要先验全：写了一半才发现 boot_b 不存在，比不写更糟。
+        ssh_mode = (connection.current(self.app_dir).mode() == connection.MODE_SSH)
         pair_no = 0
         for image, size, targets in plans:
             for target in targets:
                 pair_no += 1
                 check = "test -b %s && echo ATS_BLOCK || echo ATS_NOBLOCK" % target
                 rc, text = self._run_short(cfg, serial, check, CHECK_TIMEOUT)
-                if "ATS_BLOCK" not in (text or ""):
-                    self.log("err", "目标 %s 不是块设备或不可访问，没有写入任何分区" % target)
+                if not self._block_ok(rc, text, ssh_mode):
+                    shown = " ".join((text or "").split())[:120]
+                    self.log("err", "目标 %s 不是块设备或不可访问（返回码 %s，输出：%s），"
+                             "没有写入任何分区" % (target, rc, shown or "空"))
                     return rc, "fail"
 
                 rc, text = self._run_short(
@@ -832,9 +836,9 @@ class ReplaceImageTool(Tool):
         # ---- 重启 ----
         if preset.get("reboot", True):
             self._set_stage("reboot")
-            reboot_cmd = adbkit.build_command(cfg["adbPath"], serial, ["shell", "reboot"])
-            self.log("cmd", "$ " + shell_join(reboot_cmd))
-            rc, text = adbkit.run(cfg["adbPath"], serial, ["shell", "reboot"], REBOOT_TIMEOUT)
+            bound = transport.make(self).build(serial)
+            self.log("cmd", "$ " + bound.preview(["shell", "reboot"]))
+            rc, text = bound.run(["shell", "reboot"], REBOOT_TIMEOUT)
             text = (text or "").strip()
             if text:
                 self.log("info", text)
@@ -847,6 +851,20 @@ class ReplaceImageTool(Tool):
 
         self.log("ok", "烧写完成：%d 个镜像 → %d 个分区" % (len(plans), total))
         return rc, "ok"
+
+    @staticmethod
+    def _block_ok(rc, text, ssh_mode):
+        """这条 test -b 的结果算不算「是块设备」。
+
+        输出里有 ATS_BLOCK 最直接。ssh 还会把远端命令的退出码原样带回来，
+        所以 SSH 模式下 rc == 0 同样证明 test -b 成功 —— Windows 自带的
+        OpenSSH 经管道取 stdout 时可能只剩 stderr 的收尾诊断，这时退出码
+        就是唯一还能用的信号。adb shell 历史上总是返回 0，ADB 模式只能认
+        标记行，不能看返回码。
+        """
+        if "ATS_BLOCK" in (text or ""):
+            return True
+        return bool(ssh_mode and rc == 0)
 
     @staticmethod
     def _after_failure(written, total):
@@ -863,8 +881,11 @@ class ReplaceImageTool(Tool):
 
     def _run_short(self, cfg, serial, command, timeout):
         """跑一条短命令，输出直接进日志。返回 (返回码, 输出)。"""
-        cmd = adbkit.build_command(cfg["adbPath"], serial, ["shell", command])
-        rc, out = adbkit.run(cfg["adbPath"], serial, ["shell", command], timeout)
+        bound = transport.make(self).build(serial)
+        # 日志里留一条和实际执行完全一致的命令：闸一/二不过时，用户拿它
+        # 去手动 ssh / adb 复现，看到的就是同一条。
+        self.log("cmd", "$ " + bound.preview(["shell", command]))
+        rc, out = bound.run(["shell", command], timeout)
         text = (out or "").strip()
         if text:
             self.log("info", text)
@@ -873,27 +894,20 @@ class ReplaceImageTool(Tool):
     def _exec(self, cfg, serial, args, timeout, label):
         """跑一条长命令（push / dd / sync），输出边跑边进日志。
 
-        不用 adbkit.run 是因为它一阻塞就没法响应停止，而且拿不到中间输出。
+        不用 bound.run 是因为它一阻塞就没法响应停止，而且拿不到中间输出。
         返回 (返回码, ok | fail | stopped, 累计输出)。
         """
         t0 = time.time()
-        cmd = adbkit.build_command(cfg["adbPath"], serial, args)
-        self.log("cmd", "$ " + shell_join(cmd))
+        bound = transport.make(self).build(serial)
+        self.log("cmd", "$ " + bound.preview(args))
 
         try:
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                bufsize=0,
-                **spawn.quiet()          # 桌面版没控制台，不加就会闪黑框
-            )
+            proc = bound.popen(args)
         except FileNotFoundError:
-            self.log("err", "找不到 adb 可执行文件: %s" % cfg["adbPath"])
+            self.log("err", "找不到命令可执行文件（ADB / SSH）")
             return None, "fail", ""
         except OSError as exc:
-            self.log("err", "无法启动 adb: %s" % exc)
+            self.log("err", "无法启动命令: %s" % exc)
             return None, "fail", ""
 
         with self.lock:
@@ -971,7 +985,7 @@ class ReplaceImageTool(Tool):
                 is_cr = match.group(0) == b"\r"
                 pending = pending[match.end():]
                 line = raw.decode("utf-8", "replace").strip()
-                if not line:
+                if not line or sshkit.is_teardown_noise(line):
                     continue
                 if len(chunks) < 4000:
                     chunks.append(line + "\n")
@@ -980,7 +994,7 @@ class ReplaceImageTool(Tool):
                     self.log("info", line)
                     last_emit = now
         line = pending.decode("utf-8", "replace").strip()
-        if line:
+        if line and not sshkit.is_teardown_noise(line):
             if len(chunks) < 4000:
                 chunks.append(line + "\n")
             self.log("info", line)

@@ -23,3 +23,6 @@ files/
 # 运行时数据：自定义数据目录的指针；日志目录
 data_dir.json
 logs/
+
+# 设计评审时的页面原型（本地生成，不入库）
+.superpowers/
