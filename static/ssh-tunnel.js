@@ -1,9 +1,10 @@
-/* adb 反向隧道 二级页面 */
+/* 反向隧道 二级页面 */
 (function () {
   'use strict';
 
   var ADB = window.ADB;
   var $ = ADB.$;
+  var CONNECTION = window.CONNECTION;
 
   var client = new ADB.ToolClient('ssh_tunnel');
   var log = new ADB.LogConsole($('#log'), $('#follow'));
@@ -15,6 +16,7 @@
   var envPrompted = false;     // 这次打开页面已经弹过环境变量提醒
   var envLastConfig = null;    // 上次看到的配置，用来判断用户是否改过参数
   var envPort = 0;
+  var targets = null;          // 两套本地目标 {adb, ssh}，按连接方式各用一组
 
   client.onState(renderState);
   client.onLog(function (entry) { log.append(entry); });
@@ -68,6 +70,9 @@
     $('#kpi-failures').textContent = ADB.num(stats.failures);
     $('#kpi-last').textContent = ADB.clockTime(stats.lastConnectedAt);
 
+    // 工具状态里带着连接方式：切到 SSH 会立刻和侧边栏一起换过来
+    if (s.connection) CONNECTION.update(s.connection);
+
     // 服务端的命令行是权威版本，顺手同步一下预览
     if (extra.command && !cfgDirty) {
       lastCommand = extra.command;
@@ -85,6 +90,8 @@
   /* 服务端环境变量提醒：进页面时弹一次；勾了「不再提示」后不再自动弹。
      但参数被改过并保存后，命令可能已经变了，再提醒一次。 */
   function maybePromptEnv(s) {
+    // SSH 隧道转发的是开发板 22，服务端不需要 ANDROID_ADB_SERVER_PORT
+    if (CONNECTION.isSsh()) return;
     var cfg = s.config || {};
     var key = configKey(cfg);
     var changed = envLastConfig !== null && envLastConfig !== key;
@@ -153,6 +160,12 @@
   function updatePortHint(extra) {
     var el = $('#port-hint');
     if (!el) return;
+    if (CONNECTION.isSsh()) {
+      // 环境变量只关 ADB 的事；SSH 模式不提示，但端口占用仍能看日志
+      el.hidden = true;
+      el.textContent = '';
+      return;
+    }
     extra = extra || (state && state.extra) || {};
     var port = ADB.numberValue('#cfg-remoteport', 5037);
     var blocked = Number(extra.blockedPort) || 0;
@@ -215,7 +228,20 @@
   var form = $('#config-form');
   var cfgStatus = $('#cfg-status');
 
+  function currentGroup() {
+    return CONNECTION.isSsh() ? 'ssh' : 'adb';
+  }
+
   function collectConfig() {
+    // 深拷贝后端给的两组目标，只改当前模式那一组，另一组原样交回去
+    var copy = targets ? JSON.parse(JSON.stringify(targets)) : { adb: {}, ssh: {} };
+    var group = currentGroup();
+    if (!copy[group]) copy[group] = {};
+    copy[group].remotePort = ADB.numberValue('#cfg-remoteport',
+      group === 'ssh' ? 2222 : 5037);
+    copy[group].localHost = $('#cfg-localhost').value.trim();
+    copy[group].localPort = ADB.numberValue('#cfg-localport',
+      group === 'ssh' ? 22 : 5037);
     return {
       sshPath: $('#cfg-ssh').value.trim(),
       host: $('#cfg-host').value.trim(),
@@ -225,9 +251,7 @@
       hostKeyPolicy: $('#cfg-hostkey').value,
       keepAlive: $('#cfg-keepalive').checked,
       batchMode: $('#cfg-batchmode').checked,
-      remotePort: ADB.numberValue('#cfg-remoteport', 5037),
-      localHost: $('#cfg-localhost').value.trim(),
-      localPort: ADB.numberValue('#cfg-localport', 5037),
+      targets: copy,
       gatewayPorts: $('#cfg-gateway').checked,
       autoReconnect: $('#cfg-autoreconnect').checked,
       reconnectInterval: ADB.numberValue('#cfg-reconnect', 3)
@@ -245,9 +269,20 @@
     $('#cfg-hostkey').value = cfg.hostKeyPolicy;
     $('#cfg-keepalive').checked = !!cfg.keepAlive;
     $('#cfg-batchmode').checked = !!cfg.batchMode;
-    $('#cfg-remoteport').value = cfg.remotePort;
-    $('#cfg-localhost').value = cfg.localHost || '';
-    $('#cfg-localport').value = cfg.localPort;
+    targets = cfg.targets || null;
+    var group = currentGroup();
+    var target = targets && targets[group] ? targets[group] : null;
+    var localHostInput = $('#cfg-localhost');
+    if (target) {
+      $('#cfg-remoteport').value = target.remotePort;
+      localHostInput.value = target.localHost || '';
+      $('#cfg-localport').value = target.localPort;
+    }
+    // SSH 组的本地地址留空 = 用设置里的开发板地址，placeholder 说明这一点
+    var ssh = CONNECTION.info() && CONNECTION.info().ssh;
+    localHostInput.placeholder = (group === 'ssh' && ssh && ssh.host)
+      ? '留空则用 ' + ssh.host
+      : '';
     $('#cfg-gateway').checked = !!cfg.gatewayPorts;
     $('#cfg-autoreconnect').checked = !!cfg.autoReconnect;
     $('#cfg-reconnect').value = cfg.reconnectInterval;
@@ -306,5 +341,9 @@
 
   /* ---------------- 启动 ---------------- */
 
-  schedulePreview();
+  CONNECTION.load().then(function () {
+    if (state) applyConfig(state.config, true);
+    document.title = '反向隧道 · ADB Tool Studio';
+    schedulePreview();
+  }).catch(function () { schedulePreview(); });
 })();

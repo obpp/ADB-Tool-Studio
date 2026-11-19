@@ -25,6 +25,9 @@ window.SHELL = (function () {
   var deviceList = undefined;     // undefined = 当前工具不涉及设备（隐藏这一行）
   var deviceToolName = '';
   var lastDevicePush = 0;         // SSE 推设备列表的时间，防止旧轮询结果把它盖回去
+  var connectionInfo = null;      // /api/tools 的 connection 字段：mode / online / error …
+  var toggleMenu = null;          // 左下角切换 ADB / SSH 的上弹菜单
+  var toggleMode = null;          // 菜单打开时的模式，模式变了就自动关掉
 
   var DEVICE_WORD = {
     unauthorized: '待授权',
@@ -65,6 +68,24 @@ window.SHELL = (function () {
 
     var foot = el('div', 'sidebar-foot');
 
+    // 连接方式一行放在最上面：ADB 还是 SSH，一眼可见。
+    // 点击 / Enter / 空格 = 弹菜单选；Shift+点击 = 直接去设置页改细节。
+    var connRow = buildStatusRow('connection-status', '连接', 'connection-text', '读取中');
+    connRow.classList.add('is-link');
+    connRow.tabIndex = 0;
+    connRow.setAttribute('role', 'button');
+    connRow.setAttribute('aria-haspopup', 'menu');
+    connRow.setAttribute('aria-expanded', 'false');
+    connRow.setAttribute('aria-label', '连接方式，点击选择 ADB / SSH');
+    connRow.addEventListener('click', toggleConnection);
+    connRow.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault();
+        toggleConnection(ev);
+      }
+    });
+    foot.appendChild(connRow);
+
     foot.appendChild(buildStatusRow('conn', '服务', 'conn-text', '正在连接后端'));
     var dev = buildStatusRow('dev-status', '设备', 'dev-text', '等待设备列表');
     dev.setAttribute('data-tone', 'idle');
@@ -86,7 +107,7 @@ window.SHELL = (function () {
     theme.setAttribute('aria-label', '切换浅色 / 深色主题');
     actions.appendChild(theme);
 
-    // 说明页不在工具列表里，它是「怎么用」，不是「能跑什么」
+    // 说明页和设置页都不在工具列表里：一个讲「怎么用」，一个定数据存哪
     var help = el('a', 'btn ghost small', '使用说明');
     help.id = 'help';
     help.href = '/help';
@@ -94,6 +115,14 @@ window.SHELL = (function () {
     help.setAttribute('aria-label', '使用说明');
     if (activeId === 'help') help.setAttribute('aria-current', 'page');
     actions.appendChild(help);
+
+    var settings = el('a', 'btn ghost small', '设置');
+    settings.id = 'settings';
+    settings.href = '/settings';
+    settings.title = '选择配置、脚本、预设文件和日志保存在哪里';
+    settings.setAttribute('aria-label', '设置');
+    if (activeId === 'settings') settings.setAttribute('aria-current', 'page');
+    actions.appendChild(settings);
 
     aside.appendChild(foot);
 
@@ -152,9 +181,262 @@ window.SHELL = (function () {
     row.setAttribute('aria-label', '后端服务：' + main + '，推送' + pushWord);
   }
 
+  function renderConnection() {
+    var row = $('#connection-status');
+    if (!row) return;
+    var text = $('#connection-text');
+    var info = connectionInfo;
+
+    var tone = 'connecting';
+    var main = '读取中';
+    var detail = '';
+    if (info && info.mode === 'ssh') {
+      var ssh = info.ssh || {};
+      main = 'SSH ' + (ssh.user || 'root') + '@' + (ssh.host || '') +
+        ':' + (ssh.port || 22);
+      if (info.online) {
+        tone = 'ok';
+        detail = '通道正常' + (info.model ? ' · ' + info.model : '');
+      } else {
+        tone = 'warn';
+        detail = info.error || '还没连上';
+      }
+    } else if (info) {
+      tone = 'idle';
+      main = 'ADB';
+      detail = '当前走 adb 通道';
+    }
+
+    row.setAttribute('data-tone', tone);
+    if (text) text.textContent = main;
+    row.title = (detail ? detail + '\n' : '') +
+      '点击选择 ADB / SSH。\nShift+点击打开设置页，改地址、端口、密钥等细节。';
+    row.setAttribute('aria-label', '连接方式：' + main + '，点击选择 ADB / SSH');
+  }
+
+  /* ---------------- 连接方式选择菜单 ---------------- */
+
+  function toggleConnection(ev) {
+    if (ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey)) {
+      location.href = '/settings#conn-card';
+      return;
+    }
+    if (toggleMenu) {
+      closeToggleMenu();
+      return;
+    }
+    openToggleMenu();
+  }
+
+  function closeToggleMenu(focusBack) {
+    if (!toggleMenu) return;
+    var menu = toggleMenu;
+    toggleMenu = null;
+    toggleMode = null;
+    if (menu.parentNode) menu.parentNode.removeChild(menu);
+    document.removeEventListener('mousedown', onMenuOutside, true);
+    var row = $('#connection-status');
+    if (row) {
+      row.setAttribute('aria-expanded', 'false');
+      row.classList.remove('is-open');
+      if (focusBack !== false) row.focus();
+    }
+  }
+
+  function onMenuOutside(ev) {
+    var menu = toggleMenu;
+    var row = $('#connection-status');
+    if (!menu) return;
+    if (menu.contains(ev.target) || (row && row.contains(ev.target))) return;
+    closeToggleMenu(false);
+  }
+
+  function menuItems() {
+    if (!toggleMenu) return [];
+    var list = toggleMenu.querySelectorAll('.conn-menu-item');
+    return Array.prototype.slice.call(list);
+  }
+
+  function onMenuKey(ev) {
+    if (!toggleMenu) return;
+    if (ev.key === 'Escape') {
+      ev.preventDefault();
+      closeToggleMenu();
+      return;
+    }
+    if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp' &&
+        ev.key !== 'Home' && ev.key !== 'End') {
+      return;
+    }
+    var list = menuItems();
+    if (!list.length) return;
+    ev.preventDefault();
+    var idx = list.indexOf(document.activeElement);
+    if (ev.key === 'Home') idx = 0;
+    else if (ev.key === 'End') idx = list.length - 1;
+    else if (ev.key === 'ArrowDown') idx = idx < 0 ? 0 : (idx + 1) % list.length;
+    else idx = idx <= 0 ? list.length - 1 : idx - 1;
+    list[idx].focus();
+  }
+
+  function openToggleMenu() {
+    var row = $('#connection-status');
+    if (!row) return;
+
+    var info = connectionInfo;
+    var mode = info ? info.mode : 'adb';
+    var ssh = (info && info.ssh) || {};
+    var sshReady = !!ssh.host;
+    var online = !!(info && info.online);
+
+    var menu = el('div', 'conn-menu');
+    menu.id = 'conn-menu';
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', '选择连接方式');
+
+    function addItem(name, sub, active, select) {
+      var item = el('button', 'conn-menu-item');
+      item.type = 'button';
+      item.setAttribute('role', 'menuitemradio');
+      item.setAttribute('aria-checked', active ? 'true' : 'false');
+      var check = el('span', 'conn-menu-check', active ? '✓' : '');
+      check.setAttribute('aria-hidden', 'true');
+      item.appendChild(check);
+      var body = el('span', 'conn-menu-body');
+      body.appendChild(el('span', 'conn-menu-name', name));
+      if (sub) body.appendChild(el('span', 'conn-menu-sub', sub));
+      item.appendChild(body);
+      item.addEventListener('click', select);
+      menu.appendChild(item);
+      return item;
+    }
+
+    addItem('ADB', '本机 adb 通道', mode === 'adb', function () {
+      if (mode === 'adb') { closeToggleMenu(); return; }
+      switchTo('adb');
+    });
+
+    var sshSub;
+    if (!sshReady) {
+      sshSub = '未配置 · 去设置';
+    } else if (online) {
+      sshSub = '通道正常' + (info.model ? ' · ' + info.model : '');
+    } else {
+      sshSub = '连不上' +
+        (info.error ? ' · ' + String(info.error).split('\n')[0].slice(0, 28) : '');
+    }
+    addItem(
+      sshReady
+        ? 'SSH ' + (ssh.user || 'root') + '@' + ssh.host + ':' + (ssh.port || 22)
+        : 'SSH',
+      sshSub,
+      mode === 'ssh',
+      function () {
+        if (mode === 'ssh') { closeToggleMenu(); return; }
+        if (!sshReady) {
+          // 一次都没配过 SSH，先带用户去设置页填地址
+          location.href = '/settings#conn-card';
+          return;
+        }
+        switchTo('ssh');
+      }
+    );
+
+    menu.appendChild(el('div', 'conn-menu-sep'));
+
+    var more = el('button', 'conn-menu-item conn-menu-more', '⚙ SSH 设置…');
+    more.type = 'button';
+    more.setAttribute('role', 'menuitem');
+    more.addEventListener('click', function () {
+      location.href = '/settings#conn-card';
+    });
+    menu.appendChild(more);
+
+    var err = el('p', 'conn-menu-error');
+    err.hidden = true;
+    menu.appendChild(err);
+
+    document.body.appendChild(menu);
+    toggleMenu = menu;
+    toggleMode = mode;
+
+    // 固定在连接行上方：侧边栏在左下角，往上弹不会被裁掉
+    var rect = row.getBoundingClientRect();
+    menu.style.left = Math.max(8, rect.left) + 'px';
+    menu.style.bottom = (window.innerHeight - rect.top + 6) + 'px';
+
+    row.setAttribute('aria-expanded', 'true');
+    row.classList.add('is-open');
+    document.addEventListener('mousedown', onMenuOutside, true);
+    menu.addEventListener('keydown', onMenuKey);
+
+    var current = menu.querySelector('[aria-checked="true"]');
+    (current || menu.querySelector('.conn-menu-item')).focus();
+  }
+
+  function setMenuBusy(busy) {
+    if (!toggleMenu) return;
+    menuItems().forEach(function (item) { item.disabled = !!busy; });
+    toggleMenu.classList.toggle('is-busy', !!busy);
+  }
+
+  function showMenuError(msg) {
+    if (!toggleMenu) return;
+    var err = toggleMenu.querySelector('.conn-menu-error');
+    if (!err) return;
+    err.textContent = msg;
+    err.hidden = false;
+  }
+
+  /* 选定后调 /api/connection，成功刷新当前页；失败把原因留在菜单里。 */
+  function switchTo(mode) {
+    var body = { mode: mode };
+    if (mode === 'ssh') body.ssh = (connectionInfo && connectionInfo.ssh) || {};
+    setMenuBusy(true);
+    ADB.postJSON('/api/connection', body).then(function (res) {
+      if (!res || res.ok === false) {
+        setMenuBusy(false);
+        showMenuError((res && res.error) || '切换失败');
+        return;
+      }
+      // 切到 SSH 后 always-adb 不再适用：回到当前模式的第一个页面
+      if (mode === 'ssh' && activeId === 'always_adb') {
+        location.href = '/';
+        return;
+      }
+      location.reload();
+    }).catch(function () {
+      setMenuBusy(false);
+      showMenuError('切换失败：后端没响应');
+    });
+  }
+
   function renderDevice() {
     var row = $('#dev-status');
     if (!row) return;
+
+    // SSH 模式没有 adb 设备列表：这一行改成通道状态
+    if (connectionInfo && connectionInfo.mode === 'ssh') {
+      row.hidden = false;
+      var info = connectionInfo;
+      var sshText = $('#dev-text');
+      var sshMain;
+      var sshTone;
+      if (info.online) {
+        sshMain = 'SSH 在线' + (info.model ? ' · ' + info.model : '');
+        sshTone = 'ok';
+      } else {
+        var reason = String(info.error || '').split('\n')[0].slice(0, 40);
+        sshMain = '连不上' + (reason ? ' · ' + reason : '');
+        sshTone = 'warn';
+      }
+      row.setAttribute('data-tone', sshTone);
+      if (sshText) sshText.textContent = sshMain;
+      row.title = 'SSH 设备：' + sshMain +
+        '\n来源：连接设置里的 SSH 地址，点击上面的「连接」行去修改。';
+      row.setAttribute('aria-label', 'SSH 设备：' + sshMain);
+      return;
+    }
 
     if (deviceList === undefined) {
       row.hidden = true;
@@ -311,6 +593,13 @@ window.SHELL = (function () {
         setDevices(extra.devices);
       }
     }
+    // 工具状态里的连接信息比 3 秒轮询更新：SSE 一到就换显示
+    if (active && active.connection) {
+      connectionInfo = active.connection;
+      if (toggleMenu && connectionInfo.mode !== toggleMode) closeToggleMenu(false);
+      renderConnection();
+      renderDevice();
+    }
 
     tools.forEach(function (tool) {
       var it = items[tool.id];
@@ -332,6 +621,12 @@ window.SHELL = (function () {
         buildChannels(tools);
         built = true;
       }
+      connectionInfo = data.connection || null;
+      if (toggleMenu && connectionInfo && connectionInfo.mode !== toggleMode) {
+        closeToggleMenu(false);
+      }
+      renderConnection();
+      renderDevice();
       paint(tools);
       httpState = 'open';
       renderConn();

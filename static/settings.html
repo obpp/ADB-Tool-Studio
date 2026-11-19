@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设置 · ADB Tool Studio</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body data-tool="settings">
+
+<div class="app">
+
+  <aside class="sidebar" id="sidebar"></aside>
+
+  <main class="main">
+
+    <header class="nameplate">
+      <div class="nameplate-top">
+        <span id="where-badge" class="badge" data-tone="idle" aria-live="polite">
+          <span class="badge-icon" aria-hidden="true">■</span><span class="badge-text">读取中</span>
+        </span>
+        <h1>设置</h1>
+      </div>
+      <p class="nameplate-desc">
+        配置、脚本、预设副本和日志都放在同一个数据目录里。可以把现有文件复制到新位置，
+        也可以直接使用一个已经存有旧配置的目录；切换后立即生效，不用重启。
+      </p>
+    </header>
+
+    <div class="rule"></div>
+
+    <div class="settings-scroll">
+
+      <section class="settings-card" id="conn-card" aria-labelledby="conn-title">
+        <h2 class="help-h2" id="conn-title">连接方式</h2>
+        <p class="hint">所有功能共用这里的选择。切到 SSH 后，脚本执行、替换镜像、推送文件和反向隧道都走 SSH；切回 ADB 后行为与以前一致。</p>
+        <div class="mode-tabs" role="tablist" aria-label="连接方式">
+          <button class="mode-tab" id="conn-mode-adb" type="button" role="tab" aria-selected="true">ADB</button>
+          <button class="mode-tab" id="conn-mode-ssh" type="button" role="tab" aria-selected="false">SSH</button>
+        </div>
+        <div class="mode-panel" id="conn-panel-adb">
+          <p class="hint">设备的序列号和 adb 路径仍在各功能页选择。这里的检测只表示后端能不能列出设备。</p>
+        </div>
+        <div class="mode-panel" id="conn-panel-ssh" hidden>
+          <div class="config-grid">
+            <label class="field span-2"><span class="field-label">地址</span>
+              <input id="conn-host" type="text" autocomplete="off" spellcheck="false" placeholder="192.168.100.1"></label>
+            <label class="field"><span class="field-label">端口</span>
+              <input id="conn-port" type="number" min="1" max="65535" step="1"></label>
+            <label class="field"><span class="field-label">用户名</span>
+              <input id="conn-user" type="text" autocomplete="off" spellcheck="false" placeholder="root"></label>
+            <label class="field span-2"><span class="field-label">密钥文件</span>
+              <span class="field-inline"><input id="conn-key" type="text" autocomplete="off" spellcheck="false" placeholder="留空则用 ssh-agent 和默认密钥">
+                <button id="btn-conn-key" class="btn ghost" type="button">浏览…</button></span></label>
+            <label class="field"><span class="field-label">主机密钥策略</span>
+              <select id="conn-policy">
+                <option value="accept-new">自动接受新的</option>
+                <option value="yes">必须已存在</option>
+                <option value="no">不校验</option>
+              </select></label>
+          </div>
+          <details id="conn-advanced"><summary>高级</summary>
+            <div class="config-grid">
+              <label class="field"><span class="field-label">连接超时（秒）</span>
+                <input id="conn-timeout" type="number" min="1" max="60" step="1"></label>
+              <label class="field span-2"><span class="field-label">remount 命令</span>
+                <input id="conn-remount" type="text" autocomplete="off" spellcheck="false"></label>
+            </div>
+          </details>
+        </div>
+        <p id="conn-status" class="form-status" role="status"></p>
+        <div class="form-actions">
+          <button id="btn-conn-test" class="btn ghost" type="button">测试连接</button>
+          <button id="btn-conn-save" class="btn primary" type="button">保存并应用</button>
+        </div>
+        <p id="conn-running" class="hint" data-tone="error" hidden></p>
+      </section>
+
+      <section class="settings-card" aria-labelledby="dir-title">
+        <h2 class="help-h2" id="dir-title">数据目录</h2>
+
+        <dl class="settings-readout">
+          <div>
+            <dt>当前使用</dt>
+            <dd id="cur-dir">读取中…</dd>
+          </div>
+          <div>
+            <dt>默认位置</dt>
+            <dd id="default-dir">—</dd>
+          </div>
+          <div>
+            <dt>日志实际写入</dt>
+            <dd id="logs-dir">—</dd>
+          </div>
+        </dl>
+
+        <p id="dir-note" class="hint" hidden></p>
+
+        <form id="dir-form" class="settings-form" novalidate>
+
+          <label class="field" for="new-dir">
+            <span class="field-label">新位置</span>
+            <span class="field-inline">
+              <input id="new-dir" type="text" autocomplete="off" spellcheck="false"
+                     placeholder="例如 D:\ADB-Tool-Studio-data">
+              <button id="btn-browse" class="btn ghost" type="button">浏览…</button>
+            </span>
+          </label>
+          <p class="hint" id="browse-hint">
+            桌面版可以直接浏览文件夹；网页版拿不到完整路径，请手动填写或粘贴目录。
+          </p>
+          <p class="hint">
+            「复制并切换」把当前数据复制到填写的目录；「使用已有目录」直接读取那个目录里
+            已有的 <code>config/</code>、<code>scripts/</code>、<code>files/</code>、
+            <code>logs/</code>，不复制、也不改动它。
+          </p>
+
+          <div class="migrate-preview" id="migrate-preview" hidden>
+            <p>当前数据目录里有：</p>
+            <table>
+              <thead>
+                <tr><th>内容</th><th>文件</th><th>大小</th></tr>
+              </thead>
+              <tbody id="preview-body"></tbody>
+            </table>
+          </div>
+
+          <div class="form-actions">
+            <button id="btn-migrate" class="btn primary" type="submit">复制并切换</button>
+            <button id="btn-adopt" class="btn ghost" type="button">使用已有目录</button>
+            <button id="btn-reset" class="btn ghost" type="button" hidden>恢复默认位置</button>
+            <span id="dir-status" class="form-status" role="status"></span>
+          </div>
+
+          <div class="confirm" id="confirm" hidden>
+            <div class="confirm-text" id="confirm-text"></div>
+            <p class="confirm-note" id="confirm-note"></p>
+            <div class="confirm-actions">
+              <button id="btn-confirm-migrate" class="btn primary" type="button">确认复制</button>
+              <button id="btn-confirm-cancel" class="btn ghost" type="button">取消</button>
+            </div>
+          </div>
+
+        </form>
+      </section>
+
+      <section class="settings-card" aria-labelledby="scope-title">
+        <h2 class="help-h2" id="scope-title">数据目录里有什么</h2>
+        <table class="help-table">
+          <thead>
+            <tr><th>目录</th><th>内容</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>config/</code></td><td>各功能的参数、预设和清单</td></tr>
+            <tr><td><code>scripts/</code></td><td>导入的脚本</td></tr>
+            <tr><td><code>files/</code></td><td>推送文件、预设文件的副本</td></tr>
+            <tr><td><code>logs/</code></td><td>桌面版的 app.log；网页版不写日志文件</td></tr>
+          </tbody>
+        </table>
+        <p class="hint">
+          复制模式只复制、不删除，新位置里已有的同名文件会在确认后覆盖。
+          「使用已有目录」要求目录已经存在并至少含有上面一个子目录，
+          切换时只写指针，不动目录里的文件。
+          <code>data_dir.json</code> 记在默认位置，下次启动按它找数据目录；
+          那个目录被删掉或写不进去时会自动回退到默认位置。
+        </p>
+        <p class="hint">
+          推送预设记的是文件副本的绝对路径。复制切换会自动改成新位置；
+          使用已有目录时保持原样 —— 如果那个目录是手动拷到新路径的，
+          个别预设可能还指向旧位置，需要重新选一下文件。
+        </p>
+        <p class="hint">
+          日志在 Windows 映射的网络盘上不看位置：<code>logs/</code> 仍写本机
+          <code>%LOCALAPPDATA%</code>，拔网线时不至于卡住。上面的「日志实际写入」
+          显示的是真实路径。
+        </p>
+      </section>
+
+    </div>
+
+  </main>
+
+</div>
+
+<script src="/static/common.js"></script>
+<script src="/static/shell.js"></script>
+<script src="/static/connection.js"></script>
+<script src="/static/settings.js"></script>
+</body>
+</html>

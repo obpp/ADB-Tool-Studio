@@ -41,16 +41,21 @@ WEBVIEW2_CLIENT = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
 _log_lock = threading.Lock()
 _log_path = None
+_log_dir = None
 
 
 def _log_file():
-    global _log_path
-    if _log_path is None:
+    global _log_path, _log_dir
+    # 数据目录切换后 apppaths.logs_dir() 会变；这里跟着重新解析，
+    # 否则本次会话的日志还一直写旧目录。目录没变时不做额外 IO。
+    directory = apppaths.logs_dir()
+    if _log_path is None or _log_dir != directory:
         try:
-            os.makedirs(apppaths.logs_dir(), exist_ok=True)
-            _log_path = os.path.join(apppaths.logs_dir(), "app.log")
+            os.makedirs(directory, exist_ok=True)
+            _log_path = os.path.join(directory, "app.log")
         except OSError:
             _log_path = ""
+        _log_dir = directory
     return _log_path
 
 
@@ -190,6 +195,33 @@ class PageApi(object):
             log("打开文件对话框失败: %r" % (exc,))
             return []
         return list(paths or [])
+
+    def pick_folder(self, directory=""):
+        """弹系统的选文件夹对话框，返回完整路径；取消返回空字符串。
+
+        设置页用它挑数据目录。浏览器拿不到完整路径，所以网页版退回手填。
+        """
+        import webview
+        if not webview.windows:
+            return ""
+        window = webview.windows[0]
+        directory = os.path.expanduser(directory) if isinstance(directory, str) else ""
+        if not directory or not os.path.isdir(directory):
+            directory = ""
+        try:
+            paths = window.create_file_dialog(
+                webview.FileDialog.FOLDER,
+                directory=directory,
+            )
+        except Exception as exc:
+            log("打开文件夹对话框失败: %r" % (exc,))
+            return ""
+        if not paths:
+            return ""
+        # pywebview 各后端返回的不一样：多数给元组，个别版本给单个字符串
+        if isinstance(paths, str):
+            return paths
+        return paths[0]
 
 
 class DesktopApp(object):

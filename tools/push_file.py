@@ -26,11 +26,15 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 
 import adbkit
-import spawn
-from toolbase import Tool, as_bool, as_str, shell_join, STATUS_IDLE
+import sshkit
+import transport
+from toolbase import Tool, as_bool, as_str, STATUS_IDLE
+
+_EOL = re.compile(b"\r\n|\r|\n")
 
 # 单个文件上限。再大就不该走「拖进浏览器再上传」这条路了。
 MAX_FILE_BYTES = 4 * 1024 ** 3
@@ -134,16 +138,6 @@ def _preset_name(raw_name, files):
 def push_timeout(size):
     """一个大文件推多久算超时。按 1 MB/s 的慢速估，最少 2 分钟，最多 2 小时。"""
     return min(7200.0, max(120.0, (size or 0) / (1024.0 * 1024.0) + 60.0))
-
-
-def _clean_output(text):
-    """adb push 的进度是用 \\r 回写的：转成换行、丢掉空行和连续重复行。"""
-    lines = [line.strip() for line in (text or "").replace("\r", "\n").splitlines()]
-    out = []
-    for line in lines:
-        if line and (not out or out[-1] != line):
-            out.append(line)
-    return "\n".join(out)
 
 
 def parse_ls(output):
@@ -333,13 +327,13 @@ class PushFileTool(Tool):
     # ---------------- 设备 ----------------
 
     def refresh_devices(self):
-        cfg = self.config
-        devices, err = adbkit.list_devices(cfg["adbPath"], cfg["serial"], 10.0)
+        devices, err = transport.make(self).devices(10.0)
         self.apply_devices(devices, err)
         return devices, err
 
     def _pick_serial(self, devices):
-        return adbkit.pick_serial(devices, self.config["serial"], self.devices_error)
+        return transport.make(self).select(
+            devices, self.config["serial"], self.devices_error)
 
     # ---------------- 暂存 ----------------
 
@@ -558,7 +552,6 @@ class PushFileTool(Tool):
         if err:
             return {"ok": False, "error": err}, 400
 
-        cfg = dict(self.config)
         devices, _ = self.refresh_devices()
         serial, perr = self._pick_serial(devices)
         if not serial:
@@ -566,7 +559,8 @@ class PushFileTool(Tool):
 
         # adb shell 会把参数拼成一条命令交给设备上的 sh，路径带空格要自己引号
         command = "ls -a -p -L " + adbkit.device_quote(path)
-        rc, out = adbkit.run(cfg["adbPath"], serial, ["shell", command], LIST_TIMEOUT)
+        bound = transport.make(self).build(serial)
+        rc, out = bound.run(["shell", command], LIST_TIMEOUT)
         dirs = parse_ls(out)
 
         # 有个别条目读不了时 ls 也可能返回非 0；只要还列出了东西就照常显示
@@ -780,10 +774,6 @@ class PushFileTool(Tool):
 
                 dest = push_dir.rstrip("/") + "/" + item["name"]
                 rc, out, state = self._push_one(cfg, serial, item["path"], dest)
-                text = _clean_output(out)
-                if text:
-                    self.log("info" if state == "ok" else
-                             ("warn" if state == "stopped" else "err"), text)
 
                 if state == "stopped":
                     stopped = True
@@ -857,12 +847,14 @@ class PushFileTool(Tool):
             ("wait-for-device", 90.0, "设备已重新上线"),
             ("remount", 60.0, "remount 完成"),
         )
+        bound = transport.make(self).build(serial)
+        # adb 有几条「返回 0 但其实失败」的文本；ssh 只认返回码
+        text_checks = bound.mode == "adb"
         for args, timeout, ok_text in steps:
             if self.stop_event.is_set():
                 return False
-            cmd = adbkit.build_command(cfg["adbPath"], serial, [args])
-            self.log("cmd", "$ " + shell_join(cmd))
-            rc, out = adbkit.run(cfg["adbPath"], serial, [args], timeout)
+            self.log("cmd", "$ " + bound.preview([args]))
+            rc, out = bound.run([args], timeout)
             text = (out or "").strip()
             if text:
                 self.log("info", text)
@@ -870,90 +862,131 @@ class PushFileTool(Tool):
 
             if args == "root":
                 # production build 上 adb root 常常返回 0，却打印无法 root
-                if rc != 0 or "cannot run as root" in low:
-                    self.log("err", "adb root 失败，已停止。这台机器不允许 adbd 以 root "
-                                    "运行（production build 很常见）。如果目标目录不需要 "
-                                    "remount，把「先 root 并 remount」关掉再推。")
+                if text_checks:
+                    if rc != 0 or "cannot run as root" in low:
+                        self.log("err", "adb root 失败，已停止。这台机器不允许 adbd 以 root "
+                                        "运行（production build 很常见）。如果目标目录不需要 "
+                                        "remount，把「先 root 并 remount」关掉再推。")
+                        return False
+                elif rc != 0:
+                    self.log("err", "root 失败，已停止：%s" % (text or "返回码 %s" % rc))
                     return False
             elif args == "wait-for-device":
                 if rc != 0:
                     self.log("err", "root 之后设备没有回来，已停止")
                     return False
             else:
-                failed = (rc != 0
-                          or "remount failed" in low
-                          or "not running as root" in low
-                          or "permission denied" in low)
+                failed = rc != 0
+                if text_checks:
+                    failed = (failed
+                              or "remount failed" in low
+                              or "not running as root" in low
+                              or "permission denied" in low)
                 if failed:
-                    self.log("err", "adb remount 失败，已停止。有些机器要先执行 "
-                                    "`adb disable-verity` 再重启一次；也可以确认一下 "
-                                    "目标目录是不是本来就不需要 remount。")
+                    if text_checks:
+                        self.log("err", "adb remount 失败，已停止。有些机器要先执行 "
+                                        "`adb disable-verity` 再重启一次；也可以确认一下 "
+                                        "目标目录是不是本来就不需要 remount。")
+                    else:
+                        self.log("err", "remount 失败：%s；有些系统要先 disable-verity "
+                                        "再重启" % (text or "返回码 %s" % rc))
                     return False
             self.log("ok", ok_text)
         return True
 
     def _push_one(self, cfg, serial, src, dest):
-        """推一个文件。返回 (返回码, 输出, ok/fail/stopped)。"""
-        cmd = adbkit.build_command(cfg["adbPath"], serial, ["push", src, dest])
-        self.log("cmd", "$ " + shell_join(cmd))
+        """推一个文件，边推边把进度写进日志。返回 (返回码, 输出, ok/fail/stopped)。"""
+        bound = transport.make(self).build(serial)
+        args = ["push", src, dest]
+        self.log("cmd", "$ " + bound.preview(args))
 
         timeout = push_timeout(os.path.getsize(src))
         try:
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                encoding="utf-8",
-                errors="replace",
-                **spawn.quiet()          # 桌面版没控制台，不加就会闪黑框
-            )
+            proc = bound.popen(args)
         except FileNotFoundError:
-            self.log("err", "找不到 adb 可执行文件: %s" % cfg["adbPath"])
+            self.log("err", "找不到命令可执行文件（ADB / SSH）")
             return None, "", "fail"
         except OSError as exc:
-            self.log("err", "无法启动 adb: %s" % exc)
+            self.log("err", "无法启动命令: %s" % exc)
             return None, "", "fail"
 
         with self.lock:
             self.process = proc
 
-        out = ""
+        lines = []
+        reader = threading.Thread(target=self._pump, args=(proc, lines),
+                                  name="push-out")
+        reader.daemon = True
+        reader.start()
+
         timed_out = False
         deadline = time.time() + timeout
         try:
-            while True:
+            while proc.poll() is None:
                 if self.stop_event.is_set():
                     break
                 if time.time() > deadline:
                     timed_out = True
                     break
-                try:
-                    # communicate(timeout) 超时后可以再调，输出不会丢
-                    out, _ = proc.communicate(timeout=0.2)
-                    break
-                except subprocess.TimeoutExpired:
-                    continue
+                self.stop_event.wait(0.2)
         finally:
             if proc.poll() is None:
                 try:
                     proc.terminate()
                 except OSError:
                     pass
-                try:
-                    out, _ = proc.communicate(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    out, _ = proc.communicate()
+            try:
+                rc = proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                rc = proc.wait()
+            reader.join(1)
             with self.lock:
                 self.process = None
 
+        out = "".join(lines)
         if timed_out:
             self.log("err", "推送超时（%.0f 秒），已结束" % timeout)
-            return proc.returncode, out, "fail"
+            return rc, out, "fail"
         if self.stop_event.is_set():
-            return proc.returncode, out, "stopped"
-        return proc.returncode, out, "ok"
+            return rc, out, "stopped"
+        return rc, out, "ok"
+
+    def _pump(self, proc, lines):
+        """按 \\r / \\n 切行推进日志：adb push / ssh 的进度是用 \\r 原地刷新的。
+
+        连续重复的行只记一次（adb 会重复打同样的百分比）。
+        """
+        pending = b""
+        last = None
+        while True:
+            try:
+                chunk = os.read(proc.stdout.fileno(), 4096)
+            except (OSError, ValueError):
+                break
+            if not chunk:
+                break
+            pending += chunk
+            while True:
+                match = _EOL.search(pending)
+                if match is None:
+                    break
+                raw = pending[:match.start()]
+                pending = pending[match.end():]
+                line = raw.decode("utf-8", "replace").strip()
+                if not line or line == last or sshkit.is_teardown_noise(line):
+                    continue
+                last = line
+                lines.append(line + "\n")
+                self.log("info", line)
+        line = pending.decode("utf-8", "replace").strip()
+        if line and line != last and not sshkit.is_teardown_noise(line):
+            lines.append(line + "\n")
+            self.log("info", line)
+        try:
+            proc.stdout.close()
+        except (OSError, AttributeError):
+            pass
 
     # ---------------- 退出清理 ----------------
 

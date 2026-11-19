@@ -65,16 +65,25 @@
 
           <form id="config-form" class="config-grid">
 
-            <label class="field span-2">
+            <label class="field span-2" id="adb-path-field">
               <span class="field-label">adb 路径</span>
               <input id="cfg-adb" type="text" autocomplete="off" spellcheck="false">
             </label>
 
-            <div class="field span-2">
+            <div class="field span-2" id="device-field">
               <label class="field-label" for="cfg-serial">目标设备</label>
               <span class="field-inline">
                 <select id="cfg-serial"></select>
                 <button id="btn-refresh" class="btn ghost small" type="button">刷新</button>
+              </span>
+            </div>
+
+            <div class="field span-2" id="ssh-target-field" hidden>
+              <span class="field-label">SSH 目标</span>
+              <span class="field-inline ro">
+                <span class="conn-dot" aria-hidden="true"></span>
+                <span id="ssh-target-text">SSH · —</span>
+                <span class="ro-note">只读</span>
               </span>
             </div>
 
@@ -184,6 +193,7 @@
 
 <script src="/static/common.js"></script>
 <script src="/static/shell.js"></script>
+<script src="/static/connection.js"></script>
 <script src="/static/replace-image.js"></script>
 </body>
 </html>

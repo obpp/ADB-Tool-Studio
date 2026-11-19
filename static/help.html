@@ -26,6 +26,7 @@
       <nav class="help-toc" aria-label="本页目录">
         <a href="#features">全部功能</a>
         <a href="#common">通用设置</a>
+        <a href="#ssh">SSH 连接</a>
         <a href="#faq">常见问题</a>
       </nav>
     </header>
@@ -55,6 +56,21 @@
               <li>只切显示，不删日志；关掉期间新来的同类日志也隐藏，但计数照加</li>
               <li>选择存在浏览器里，换页面、重开窗口都沿用</li>
               <li>一类都不剩时会提示「没有符合当前过滤条件的日志」，不是卡住了</li>
+            </ul>
+          </article>
+
+          <article class="help-card">
+            <h3>数据目录</h3>
+            <p>侧边栏底部的 <strong>设置</strong> 把 config / scripts / files / logs
+              整体换到别的目录。可以复制过去，也可以直接使用一个已有旧配置的目录。</p>
+            <ul>
+              <li><strong>复制并切换</strong>：目标里已有同名文件时会列出来，再确认一次才覆盖；旧目录不删</li>
+              <li><strong>使用已有目录</strong>：先列出里面找到的内容，确认后只写指针，不复制、不改动那个目录</li>
+              <li>使用已有目录要求目录已经存在，且至少含有 config / scripts / files / logs 中的一个</li>
+              <li>切换完立即生效，不用重启；其他开着的页面刷新一下</li>
+              <li>有功能在跑时不让切，先点「全部停止」</li>
+              <li>新目录被删掉或 U 盘没插时，启动自动回退默认位置</li>
+              <li>网页版拿不到完整路径，直接填或粘目录；桌面版可以浏览</li>
             </ul>
           </article>
 
@@ -119,6 +135,29 @@
             <p class="help-note">两个版本共用同一份后端和页面，功能完全一样。</p>
           </article>
 
+        </div>
+      </section>
+
+      <section class="help-section" id="ssh">
+        <h2 class="help-h2">SSH 连接</h2>
+        <p class="help-note">设置页顶部的连接方式切到 SSH 后，脚本执行、替换镜像、推送文件和反向隧道都改走 SSH。</p>
+        <div class="help-grid">
+          <article class="help-card">
+            <h3>前提</h3>
+            <ul>
+              <li>开发板能用密钥免密登录，本机已把公钥放进开发板的 authorized_keys，或已 ssh-add</li>
+              <li>登录用户是 root；SSH 模式不再执行 adb root</li>
+              <li>软件固定带 BatchMode=yes，不会停在密码提示上</li>
+            </ul>
+          </article>
+          <article class="help-card">
+            <h3>隧道与主机密钥</h3>
+            <ul>
+              <li>反向隧道默认只绑远端 loopback，远端 sshd 的 GatewayPorts 保持关闭</li>
+              <li>主机密钥默认 accept-new：第一次记录，之后变化会报错</li>
+              <li>SSH 登录是 root，开发板的 SSH 暴露面要自己控制</li>
+            </ul>
+          </article>
         </div>
       </section>
 
@@ -187,6 +226,7 @@
 
 <script src="/static/common.js"></script>
 <script src="/static/shell.js"></script>
+<script src="/static/connection.js"></script>
 <script src="/static/help.js"></script>
 </body>
 </html>

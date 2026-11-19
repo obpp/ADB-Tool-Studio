@@ -4,6 +4,7 @@
 
   var ADB = window.ADB;
   var $ = ADB.$;
+  var CONNECTION = window.CONNECTION;
 
   var DEVICE_STATE = {
     'device': '已连接', 'unauthorized': '未授权', 'offline': '离线',
@@ -17,6 +18,17 @@
   var devices = [];
   var cfgDirty = false;
   var state = null;
+  var adbOnly = false;       // SSH 模式下这个功能不可用
+
+  CONNECTION.load().then(function (info) {
+    adbOnly = !!info && info.mode === 'ssh';
+    var notice = $('#adb-only-notice');
+    if (notice) notice.hidden = !adbOnly;
+    if (adbOnly) {
+      $('#btn-start').disabled = true;
+      $('#btn-once').disabled = true;
+    }
+  }).catch(function () { /* 读不到连接方式就按 ADB 处理 */ });
 
   client.onState(renderState);
   client.onLog(function (entry) { log.append(entry); });
@@ -71,8 +83,8 @@
     fillSerialOptions(s.config ? s.config.serial : '');
 
     var running = s.status !== 'idle';
-    $('#btn-start').disabled = running;
-    $('#btn-once').disabled = running;
+    $('#btn-start').disabled = running || adbOnly;
+    $('#btn-once').disabled = running || adbOnly;
     $('#btn-stop').disabled = !running;
   }
 

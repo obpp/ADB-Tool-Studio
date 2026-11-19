@@ -10,11 +10,17 @@
 所以对外只暴露 resource_dir()（只读）和 data_dir()（可写），别的地方不要自己拼路径。
 """
 
+import json
 import os
 import sys
+import tempfile
 
 FROZEN = bool(getattr(sys, "frozen", False))
 _SOURCE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 记住自定义数据目录的指针文件。它永远放在默认数据目录里：
+# 指针自己跟着搬走的话，下次启动就找不到它了。
+DATA_POINTER_NAME = "data_dir.json"
 
 
 def is_frozen():
@@ -36,35 +42,132 @@ def resource_dir():
 
 
 def _can_write(directory):
-    probe = os.path.join(directory, ".write-probe")
+    # 用 mkstemp 生成互不相同的名字。设置页会反复问、多个标签页还会并发，
+    # 固定叫 .write-probe 的话两个线程会互相删掉对方的探针，把可写的目录
+    # 误判成只读。
     try:
-        with open(probe, "w") as fp:
-            fp.write("")
-        os.remove(probe)
-        return True
+        fd, probe = tempfile.mkstemp(prefix=".write-probe-", dir=directory)
     except OSError:
         return False
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    try:
+        os.remove(probe)
+    except OSError:
+        pass
+    return True
 
 
-_data_dir = None
-
-
-def data_dir():
-    """可写数据目录，config/ 和 logs/ 都在它下面。
+def default_data_dir():
+    """默认数据目录。
 
     优先用 exe 旁边（绿色版：整个文件夹拷到 U 盘也能带走配置）；
     旁边写不进去（装在 Program Files 之类）才退回用户目录。
     """
-    global _data_dir
-    if _data_dir:
-        return _data_dir
     target = install_dir()
     if not _can_write(target):
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
         target = os.path.join(base, "ADB-Tool-Studio")
         os.makedirs(target, exist_ok=True)
-    _data_dir = target
+    return target
+
+
+def data_dir_pointer_path():
+    return os.path.join(default_data_dir(), DATA_POINTER_NAME)
+
+
+def read_data_dir_pointer():
+    """读记住的自定义位置，返回 (路径, 错误)。
+
+    没有设置过时路径为空；文件坏了也给空路径 + 一句错误，
+    调用方回退默认目录，不要因为一个坏文件起不来。
+    """
+    pointer = data_dir_pointer_path()
+    try:
+        with open(pointer, "r", encoding="utf-8") as fp:
+            saved = json.load(fp)
+    except FileNotFoundError:
+        return "", ""
+    except (IOError, OSError, ValueError) as exc:
+        return "", "读不了 %s: %s" % (pointer, exc)
+    if not isinstance(saved, dict):
+        return "", "%s 的格式不对" % pointer
+    value = saved.get("dataDir")
+    if not isinstance(value, str) or not value.strip():
+        return "", "%s 里没有 dataDir" % pointer
+    return os.path.abspath(os.path.expanduser(value.strip())), ""
+
+
+def write_data_dir_pointer(path):
+    pointer = data_dir_pointer_path()
+    os.makedirs(os.path.dirname(pointer), exist_ok=True)
+    tmp = pointer + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fp:
+        json.dump({"dataDir": os.path.abspath(path)}, fp, ensure_ascii=False, indent=2)
+    os.replace(tmp, pointer)
+
+
+def clear_data_dir_pointer():
+    try:
+        os.remove(data_dir_pointer_path())
+    except FileNotFoundError:
+        pass
+
+
+_data_dir = None
+_data_dir_error = ""
+
+
+def data_dir():
+    """可写数据目录，config/、scripts/、files/、logs/ 都在它下面。
+
+    默认是 exe 旁边，其次用户目录。用户在设置页换过位置时，
+    data_dir.json 记着新位置；那个目录不存在（比如 U 盘没插）或
+    写不进去就回退默认目录 —— 启动失败比丢掉设置更糟。
+    """
+    global _data_dir, _data_dir_error
+    if _data_dir:
+        return _data_dir
+    default = default_data_dir()
+    wanted, error = read_data_dir_pointer()
+    if wanted:
+        if os.path.isdir(wanted) and _can_write(wanted):
+            _data_dir = wanted
+            _data_dir_error = ""
+            return _data_dir
+        _data_dir_error = ("data_dir.json 指向的目录不可用（不存在或写不进去）："
+                           "%s，已回退到默认目录" % wanted)
+    elif error:
+        _data_dir_error = error + "，已回退到默认目录"
+    _data_dir = default
     return _data_dir
+
+
+def data_dir_status():
+    """给设置页用：当前目录、默认目录、指针状态和回退原因。"""
+    current = data_dir()
+    default = default_data_dir()
+    pointer, error = read_data_dir_pointer()
+    same = (os.path.normcase(os.path.abspath(current)) ==
+            os.path.normcase(os.path.abspath(default)))
+    return {
+        "dataDir": current,
+        "defaultDir": default,
+        "isCustom": not same,
+        "pointerPath": data_dir_pointer_path(),
+        "pointer": pointer,
+        "error": _data_dir_error or error,
+    }
+
+
+def apply_data_dir(path):
+    """迁移成功后让当前进程改从新目录读写，并让日志路径重新解析。"""
+    global _data_dir, _data_dir_error, _logs_dir
+    _data_dir = os.path.abspath(path)
+    _data_dir_error = ""
+    _logs_dir = None
 
 
 def _is_remote_path(path):
@@ -138,15 +241,23 @@ def config_dir():
 _logs_dir = None
 
 
+def logs_dir_for(directory):
+    """指定数据目录对应的日志目录；网络盘上仍改用本机盘。
+
+    设置页用它预览「切过去之后日志会写在哪」，此时还没 apply_data_dir。
+    """
+    target = os.path.join(directory, "logs")
+    if _is_remote_path(target):
+        target = os.path.join(local_data_dir(), "logs")
+    return target
+
+
 def logs_dir():
     """日志目录。数据目录在网络盘上时改用本机盘 —— 拔网线之后恰恰最需要日志。"""
     global _logs_dir
     if _logs_dir:
         return _logs_dir
-    target = os.path.join(data_dir(), "logs")
-    if _is_remote_path(target):
-        target = os.path.join(local_data_dir(), "logs")
-    _logs_dir = target
+    _logs_dir = logs_dir_for(data_dir())
     return _logs_dir
 
 

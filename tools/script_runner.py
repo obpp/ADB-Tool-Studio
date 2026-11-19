@@ -28,8 +28,11 @@ import threading
 import time
 
 import adbkit
-import spawn
-from toolbase import Tool, as_bool, as_int, as_num, as_str, shell_join
+import sshkit
+import transport
+from toolbase import Tool, as_bool, as_int, as_num, as_str
+
+_EOL = re.compile(b"\r\n|\r|\n")
 
 # 导入脚本的大小上限。脚本是文本，几 MB 已经离谱了。
 MAX_SCRIPT_BYTES = 2 * 1024 * 1024
@@ -399,7 +402,7 @@ class ScriptRunnerTool(Tool):
     def refresh_devices(self):
         cfg = self.config
         timeout = min(10.0, cfg["timeout"])
-        devices, err = adbkit.list_devices(cfg["adbPath"], cfg["serial"], timeout)
+        devices, err = transport.make(self).devices(timeout)
         with self.lock:
             self.devices = devices
             self.devices_error = err
@@ -408,7 +411,8 @@ class ScriptRunnerTool(Tool):
 
     def _pick_serial(self, devices):
         """确定这次用哪台设备。返回 (serial, 错误说明)。"""
-        return adbkit.pick_serial(devices, self.config["serial"], self.devices_error)
+        return transport.make(self).select(
+            devices, self.config["serial"], self.devices_error)
 
     # ---------------- 本工具自己的 POST 动作 ----------------
 
@@ -682,15 +686,15 @@ class ScriptRunnerTool(Tool):
                 return outcome
             self.log("info", "执行 %s · 目标设备 %s" % (script_name, serial))
 
+            bound = transport.make(self).build(serial)
             remote = cfg["remoteDir"].rstrip("/") + "/" + remote_name
-            push_cmd = adbkit.build_command(cfg["adbPath"], serial, ["push", script_path, remote])
-            self.log("cmd", "$ " + shell_join(push_cmd))
-            push_rc, push_out = adbkit.run(
-                cfg["adbPath"], serial, ["push", script_path, remote], cfg["timeout"])
+            push_args = ["push", script_path, remote]
+            self.log("cmd", "$ " + bound.preview(push_args))
+            push_rc, push_out = bound.run(push_args, cfg["timeout"])
             text = (push_out or "").strip()
             if text:
                 self.log("info", text)
-            if adbkit.problem(push_rc, push_out) is not None:
+            if bound.problem(push_rc, push_out) is not None:
                 self.log("err", "推送失败，脚本没有执行")
                 return outcome
             if self.stop_event.is_set():
@@ -698,6 +702,16 @@ class ScriptRunnerTool(Tool):
                 outcome = "stopped"
                 return outcome
             self.log("ok", "已推送到 %s" % remote)
+
+            # 推上去的文件默认没有执行位。执行本身用 sh 不依赖它，但用户
+            # ssh 进设备手动跑同一份脚本时要能直接 ./xxx，所以补一下。
+            chmod_args = ["shell", "chmod 755 " + adbkit.device_quote(remote)]
+            self.log("cmd", "$ " + bound.preview(chmod_args))
+            chmod_rc, chmod_out = bound.run(chmod_args, cfg["timeout"])
+            if bound.problem(chmod_rc, chmod_out) is not None:
+                chmod_text = (chmod_out or "").strip()
+                self.log("warn", "加执行权限失败" +
+                         ("：" + chmod_text if chmod_text else "") + "，改用 sh 执行")
 
             rc, outcome = self._shell(cfg, serial, remote, argv)
             return outcome
@@ -732,28 +746,17 @@ class ScriptRunnerTool(Tool):
         # 不经过本地 shell，所以带空格的参数到那边会被拆开。这里自己按 POSIX
         # 规则把每个参数引号包好，整体作为一条命令传过去。
         device_cmd = " ".join(adbkit.device_quote(tok) for tok in ["sh", remote] + argv)
-        cmd = adbkit.build_command(cfg["adbPath"], serial, ["shell", device_cmd])
-
-        # 日志里按参数分开显示，和手敲的写法一致，方便直接抄走
-        self.log("cmd", "$ " + shell_join(
-            adbkit.build_command(cfg["adbPath"], serial, ["shell", "sh", remote] + argv)))
+        bound = transport.make(self).build(serial)
+        # 日志和实际执行的是同一条命令，复制出去就能重放
+        self.log("cmd", "$ " + bound.preview(["shell", device_cmd]))
 
         try:
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                bufsize=1,
-                encoding="utf-8",
-                errors="replace",
-                **spawn.quiet()          # 桌面版没控制台，不加就会闪黑框
-            )
+            proc = bound.popen(["shell", device_cmd])
         except FileNotFoundError:
-            self.log("err", "找不到 adb 可执行文件: %s" % cfg["adbPath"])
+            self.log("err", "找不到命令可执行文件（ADB / SSH）")
             return None, "fail"
         except OSError as exc:
-            self.log("err", "无法启动 adb: %s" % exc)
+            self.log("err", "无法启动命令: %s" % exc)
             return None, "fail"
 
         with self.lock:
@@ -806,18 +809,44 @@ class ScriptRunnerTool(Tool):
         return rc, "fail"
 
     def _pump(self, proc):
-        try:
-            for line in iter(proc.stdout.readline, ""):
-                line = line.rstrip("\r\n")
-                if line:
-                    self.log("info", line)
-        except (ValueError, OSError):
-            pass
-        finally:
+        """把子进程输出按行推进日志。
+
+        不能直接用 readline：adb push / dd 之类会用 \\r 原地刷新进度，
+        没有 \\n 时 readline 会一直等到命令结束，进度就变成一条巨型字符串。
+        所以 \\r 和 \\n 都当换行，\\r 那种最多每 0.4 秒打一行。
+        """
+        pending = b""
+        last_emit = 0.0
+        while True:
             try:
-                proc.stdout.close()
-            except (OSError, AttributeError):
-                pass
+                chunk = os.read(proc.stdout.fileno(), 4096)
+            except (OSError, ValueError):
+                break
+            if not chunk:
+                break
+            pending += chunk
+            while True:
+                match = _EOL.search(pending)
+                if match is None:
+                    break
+                raw = pending[:match.start()]
+                is_cr = match.group(0) == b"\r"
+                pending = pending[match.end():]
+                line = raw.decode("utf-8", "replace").strip()
+                # Windows OpenSSH 退出时打的收尾诊断不是脚本输出，别进日志
+                if not line or sshkit.is_teardown_noise(line):
+                    continue
+                now = time.time()
+                if not is_cr or now - last_emit > 0.4:
+                    self.log("info", line)
+                    last_emit = now
+        line = pending.decode("utf-8", "replace").strip()
+        if line and not sshkit.is_teardown_noise(line):
+            self.log("info", line)
+        try:
+            proc.stdout.close()
+        except (OSError, AttributeError):
+            pass
 
 
 def _new_id():

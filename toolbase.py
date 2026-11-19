@@ -17,6 +17,7 @@ import threading
 import time
 from collections import deque
 
+import connection
 import devicewatch
 
 LEVELS = ("cmd", "info", "ok", "warn", "err")
@@ -148,6 +149,10 @@ class Tool(object):
     def ensure_device_watch(self):
         if not hasattr(self, "refresh_devices"):
             return
+        if connection.current(self.app_dir).mode() == connection.MODE_SSH:
+            # SSH 只有一块开发板：进程内共用一个探测线程，别再按工具各起一份
+            connection.monitor().register(self)
+            return
         with self.lock:
             if self._device_watch is not None:
                 return
@@ -157,15 +162,29 @@ class Tool(object):
 
     def kick_device_watch(self):
         """配置里的 adb 路径/序列号改了，让监听用新配置重新等。"""
+        if connection.current(self.app_dir).mode() == connection.MODE_SSH:
+            mon = connection.peek_monitor()
+            if mon is not None:
+                mon.kick()
+            return
         watcher = self._device_watch
         if watcher is not None:
             watcher.kick()
 
     def stop_device_watch(self):
+        mon = connection.peek_monitor()
+        if mon is not None:
+            mon.unregister(self)
         watcher = self._device_watch
         self._device_watch = None
         if watcher is not None:
             watcher.stop()
+
+    def reset_devices(self):
+        """切连接方式时把设备状态清干净，别显示上一模式的设备。"""
+        self._last_online = None
+        self.apply_devices([], "")
+        self.publish_state()
 
     def apply_devices(self, devices, error=""):
         """把一批设备列表写进工具状态。子类都沿用 devices/devices_error/deviceCount。"""
@@ -268,6 +287,7 @@ class Tool(object):
         return 0.0
 
     def snapshot(self, include_history=False):
+        conn_info = connection.current(self.app_dir).info()
         with self.lock:
             snap = {
                 "id": self.id,
@@ -278,6 +298,7 @@ class Tool(object):
                 "stats": dict(self.stats),
                 "config": dict(self.config),
                 "extra": self.extra(),
+                "connection": conn_info,
                 "serverTime": time.time(),
             }
             if include_history:
@@ -286,6 +307,7 @@ class Tool(object):
 
     def summary(self):
         """侧边栏 / 工具列表用的概要数据（不含历史、不摊开配置）。"""
+        conn_info = connection.current(self.app_dir).info()
         with self.lock:
             return {
                 "id": self.id,
@@ -299,6 +321,7 @@ class Tool(object):
                 "brief": self.brief(),
                 "stats": dict(self.stats),
                 "extra": self.extra(),
+                "connection": conn_info,
             }
 
     # ---------------- 启停 ----------------
